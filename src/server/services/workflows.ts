@@ -18,7 +18,7 @@ import {
   WORKFLOW_TRIGGERS,
 } from "@/server/db/schema";
 import seed from "@/server/db/seed-workflows.json";
-import { formatMoney } from "@/lib/format";
+import { renderReason } from "@/lib/ticket-template";
 import { audit, type Actor } from "./audit";
 import { recordHealth, recordNetworkFailure } from "./health";
 import { requestRefund } from "./refunds";
@@ -286,17 +286,7 @@ const MAX_ATTEMPTS = 3;
 const unreachable = (res: ApiResult<unknown>) => !res.ok && (res.status === null || res.status === 503);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export function renderReason(template: string, facts: Facts, event: WorkflowEvent): string {
-  const values: Record<string, string> = {
-    order_id: event.orderId,
-    amount: typeof facts.amount_minor === "number" ? formatMoney(facts.amount_minor) : "-",
-    order_status: String(facts.order_status ?? "-"),
-    payment_status: String(facts.payment_status ?? "-"),
-    shipment_status: String(facts.shipment_status ?? "-"),
-    event_type: event.type,
-  };
-  return template.replace(/\{(\w+)\}/g, (m, key: string) => values[key] ?? m);
-}
+export { renderReason }; // lives in src/lib/ticket-template.ts so the editor preview uses the same code
 
 // POST /commerce/tickets has no idempotency key: before any retry, look for the ticket a lost reply may have created.
 async function createTicket(template: string, facts: Facts, event: WorkflowEvent, executionId: number, actor: Actor): Promise<ActionOutcome> {

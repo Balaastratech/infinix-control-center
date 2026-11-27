@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { formatIst, formatMoney } from "@/lib/format";
+import { auditActionLabel, auditTargetLabel } from "@/lib/labels";
 import type { Dashboard } from "@/server/services/dashboard";
 import { Alert, Badge, Card, Empty, Skeleton, SkeletonCard, TableWrap } from "./ui";
 
@@ -398,8 +399,8 @@ export function DashboardView({ canOperate }: { canOperate: boolean }) {
                           {a.role ?? "no role"} · {formatIst(a.at)}
                         </small>
                       </td>
-                      <td className="mono">{a.action}</td>
-                      <td>{a.target ?? "-"}</td>
+                      <td>{auditActionLabel(a.action)}</td>
+                      <td>{auditTargetLabel(a.action, a.target)}</td>
                       <td>
                         <Badge status={a.outcome} />
                       </td>

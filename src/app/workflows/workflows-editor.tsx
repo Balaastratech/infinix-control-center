@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { formatIst, formatMoney, parseRupees } from "@/lib/format";
+import { ACTION_LABELS, conditionLabel, FIELD_LABELS, OP_LABELS, SAMPLE_ORDER, statusLabel, TRIGGER_LABELS } from "@/lib/labels";
+import { renderReason } from "@/lib/ticket-template";
 import { Alert, Badge, Card, Empty, Skeleton, SkeletonCard, TableWrap } from "../ui";
 
 // Option lists for the form only; the server validates every value again (services/workflows.ts).
@@ -68,9 +70,14 @@ const EMPTY: Form = {
   amount: "",
 };
 
-const describeCondition = (c: Condition) => `${c.field} ${c.op} ${c.field === "amount_minor" ? formatMoney(c.value as number) : c.value}`;
+const describeCondition = (c: Condition) => conditionLabel(c);
 const describeAction = (a: Action) =>
-  a.type === "create_ticket" ? `create ticket: "${a.reason}"` : `request refund: ${a.amount_minor ? formatMoney(a.amount_minor) : "full refundable amount"}`;
+  a.type === "create_ticket"
+    ? "Create support ticket"
+    : `Request refund (needs Manager approval): ${a.amount_minor ? formatMoney(a.amount_minor) : "full refundable amount"}`;
+// The ticket text as it would read for a sample order, rendered by the same template code the workflow engine uses.
+const previewTicket = (reason: string, trigger: string) =>
+  renderReason(reason, SAMPLE_ORDER.facts, { orderId: SAMPLE_ORDER.orderId, type: trigger });
 
 function toForm(w: Workflow): Form {
   return {
@@ -233,7 +240,7 @@ export function WorkflowsEditor({ isManager }: { isManager: boolean }) {
                     <td>
                       <b>{w.name}</b>
                     </td>
-                    <td className="mono">{w.trigger}</td>
+                    <td>{TRIGGER_LABELS[w.trigger] ?? w.trigger}</td>
                     <td>
                       {w.conditions.map((c, i) => (
                         <div key={i} className="small">
@@ -242,7 +249,15 @@ export function WorkflowsEditor({ isManager }: { isManager: boolean }) {
                         </div>
                       ))}
                     </td>
-                    <td className="small">{describeAction(w.action)}</td>
+                    <td className="small">
+                      {describeAction(w.action)}
+                      {w.action.type === "create_ticket" && (
+                        <div className="preview" title={`Template: ${w.action.reason}`}>
+                          “{previewTicket(w.action.reason, w.trigger)}”
+                          <small>Preview for sample order {SAMPLE_ORDER.orderId}</small>
+                        </div>
+                      )}
+                    </td>
                     <td>
                       <Badge status={w.enabled ? "enabled" : "disabled"} />
                     </td>
@@ -287,13 +302,15 @@ export function WorkflowsEditor({ isManager }: { isManager: boolean }) {
                 <span>When</span>
                 <select value={form.trigger} onChange={(e) => setForm({ ...form, trigger: e.target.value })}>
                   {TRIGGERS.map((t) => (
-                    <option key={t}>{t}</option>
+                    <option key={t} value={t}>
+                      {TRIGGER_LABELS[t] ?? t}
+                    </option>
                   ))}
                 </select>
               </label>
             </div>
             <fieldset className="stack">
-              <legend>If all of (checked against stored order, payment and shipment data)</legend>
+              <legend>Only if all of these are true (checked against our stored order, payment and shipment)</legend>
               {form.conditions.map((c, i) => {
                 const isAmount = c.field === "amount_minor";
                 return (
@@ -307,12 +324,16 @@ export function WorkflowsEditor({ isManager }: { isManager: boolean }) {
                       }}
                     >
                       {FIELDS.map((f) => (
-                        <option key={f}>{f}</option>
+                        <option key={f} value={f}>
+                          {FIELD_LABELS[f] ?? f}
+                        </option>
                       ))}
                     </select>
                     <select aria-label="Operator" value={c.op} onChange={(e) => setCondition(i, { op: e.target.value })}>
                       {(isAmount ? AMOUNT_OPS : ["eq", "neq"]).map((o) => (
-                        <option key={o}>{o}</option>
+                        <option key={o} value={o}>
+                          {OP_LABELS[o] ?? o}
+                        </option>
                       ))}
                     </select>
                     {isAmount ? (
@@ -323,7 +344,9 @@ export function WorkflowsEditor({ isManager }: { isManager: boolean }) {
                     ) : (
                       <select aria-label="Value" value={c.value} onChange={(e) => setCondition(i, { value: e.target.value })}>
                         {STATUS_OPTIONS[c.field].map((s) => (
-                          <option key={s}>{s}</option>
+                          <option key={s} value={s}>
+                            {statusLabel(s)}
+                          </option>
                         ))}
                       </select>
                     )}
@@ -352,8 +375,8 @@ export function WorkflowsEditor({ isManager }: { isManager: boolean }) {
             <label className="field">
               <span>Then</span>
               <select value={form.actionType} onChange={(e) => setForm({ ...form, actionType: e.target.value as Action["type"] })}>
-                <option value="create_ticket">create support ticket</option>
-                <option value="request_refund">request refund (needs Manager approval)</option>
+                <option value="create_ticket">{ACTION_LABELS.create_ticket}</option>
+                <option value="request_refund">{ACTION_LABELS.request_refund}</option>
               </select>
             </label>
             {form.actionType === "create_ticket" ? (
@@ -361,6 +384,12 @@ export function WorkflowsEditor({ isManager }: { isManager: boolean }) {
                 <span>Ticket reason</span>
                 <input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} required maxLength={500} />
                 <span className="hint">Placeholders: {PLACEHOLDER_HINT}</span>
+                {form.reason.trim() && (
+                  <span className="preview">
+                    “{previewTicket(form.reason, form.trigger)}”
+                    <small className="muted"> · preview for sample order {SAMPLE_ORDER.orderId}</small>
+                  </span>
+                )}
               </label>
             ) : (
               <label className="field">

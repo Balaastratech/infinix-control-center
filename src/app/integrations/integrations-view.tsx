@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { formatIst } from "@/lib/format";
+import { statusLabel } from "@/lib/labels";
 import type { EventRow } from "@/server/services/dashboard";
 import type { ServiceStatus } from "@/server/services/health";
-import { Alert, Badge, Card, Empty, SkeletonCard, TableWrap } from "../ui";
+import { Alert, Badge, Card, Empty, FilterSelect, SkeletonCard, TableWrap } from "../ui";
 
 interface SyncRun {
   id: number;
@@ -129,18 +130,8 @@ export function IntegrationsView() {
           <span className="muted small">Rejected = wrong or missing X-Webhook-Secret (audited, not stored). Duplicates are not stored.</span>
         </div>
         <div className="toolbar">
-          <select aria-label="Event status" value={filters.status} onChange={(e) => set("status", e.target.value)}>
-            <option value="">status: any</option>
-            {data.eventStatuses.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-          <select aria-label="Event type" value={filters.type} onChange={(e) => set("type", e.target.value)}>
-            <option value="">type: any</option>
-            {data.eventTypes.map((t) => (
-              <option key={t}>{t}</option>
-            ))}
-          </select>
+          <FilterSelect label="Status" value={filters.status} options={data.eventStatuses} onChange={(v) => set("status", v)} />
+          <FilterSelect label="Type" value={filters.type} options={data.eventTypes} onChange={(v) => set("type", v)} />
         </div>
         {data.events.length === 0 ? (
           <Empty>No webhook events match.</Empty>
@@ -163,7 +154,7 @@ export function IntegrationsView() {
                   <tr key={e.id}>
                     <td className="nowrap">{formatIst(e.receivedAt)}</td>
                     <td className="mono">{e.status === "rejected" ? "-" : e.id}</td>
-                    <td className="mono">{e.type}</td>
+                    <td>{statusLabel(e.type)}</td>
                     <td>{e.orderId ? <Link href={`/orders/${e.orderId}`}>{e.orderId}</Link> : "-"}</td>
                     <td className="nowrap">{formatIst(e.occurredAt)}</td>
                     <td>

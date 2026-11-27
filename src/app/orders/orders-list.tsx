@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { formatIst, formatMoney } from "@/lib/format";
-import { Alert, Badge, Empty, Skeleton, TableWrap } from "../ui";
+import { Alert, Badge, Empty, FilterSelect, Skeleton, TableWrap } from "../ui";
 
 interface OrderRow {
   id: string;
@@ -31,6 +31,7 @@ const FILTERS = {
   paymentStatus: ["captured", "failed"],
   shipmentStatus: ["pending", "shipped", "delayed", "delivered", "cancelled"],
 } as const;
+const FILTER_LABELS: Record<keyof typeof FILTERS, string> = { orderStatus: "Order status", paymentStatus: "Payment", shipmentStatus: "Shipment" };
 const PAGE_SIZE = 25;
 
 export function OrdersList() {
@@ -81,23 +82,12 @@ export function OrdersList() {
   return (
     <section className="card">
       <div className="toolbar">
-        <input
-          className="grow"
-          type="search"
-          placeholder="Order id, customer name or email"
-          aria-label="Search orders"
-          value={filters.q}
-          onChange={(e) => set("q", e.target.value)}
-        />
+        <label className="field grow">
+          <span>Search</span>
+          <input type="search" placeholder="Order id, customer name or email" value={filters.q} onChange={(e) => set("q", e.target.value)} />
+        </label>
         {(Object.keys(FILTERS) as (keyof typeof FILTERS)[]).map((key) => (
-          <select key={key} aria-label={`${key.replace("Status", "")} status`} value={filters[key]} onChange={(e) => set(key, e.target.value)}>
-            <option value="">{key.replace("Status", "")}: any</option>
-            {FILTERS[key].map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
+          <FilterSelect key={key} label={FILTER_LABELS[key]} value={filters[key]} options={FILTERS[key]} onChange={(v) => set(key, v)} />
         ))}
         <label className="check">
           <input type="checkbox" checked={filters.localAhead === "true"} onChange={(e) => set("localAhead", e.target.checked ? "true" : "")} /> Local ahead only

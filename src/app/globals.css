@@ -490,7 +490,6 @@ a.kpi:hover {
   font-weight: 600;
   line-height: 18px;
   white-space: nowrap;
-  text-transform: capitalize;
 }
 .badge::before {
   content: "";
@@ -760,13 +759,57 @@ legend {
 .toolbar {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
   gap: var(--s2);
   padding: var(--s3) var(--s4);
   border-bottom: 1px solid var(--line-soft);
 }
 .toolbar .grow {
   flex: 1 1 240px;
+}
+.toolbar .check {
+  height: 36px;
+}
+.link-button {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--accent-text);
+  font-size: var(--text-sm);
+  font-weight: 550;
+  box-shadow: var(--shadow-sm);
+}
+.link-button:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+details summary {
+  cursor: pointer;
+  color: var(--accent-text);
+  font-size: var(--text-xs);
+}
+details pre {
+  margin: var(--s1) 0 0;
+  padding: var(--s2);
+  max-width: 420px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  border-radius: var(--radius-sm);
+  background: var(--gray-50);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+.preview {
+  padding: var(--s2) var(--s3);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  font-size: var(--text-sm);
 }
 .money-input {
   display: inline-flex;

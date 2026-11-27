@@ -132,19 +132,23 @@ function nextSteps(
   ticketCount: number,
   ops: { type: string; status: string }[],
 ): Item[] {
-  const next: string[] = [];
+  // Each step links to the page where it is done; the text keeps the "Next: " prefix.
+  const next: Item[] = [];
+  const at = (text: string, href?: string) => next.push({ text: `Next: ${text}`, href });
+  const orderPage = orderLink(order.id);
   const actions = allowedActions(order);
   const reserving: readonly string[] = RESERVING_STATUSES;
   if (ops.some((o) => o.type === "refund" && reserving.includes(o.status))) {
-    next.push("a refund request is already open: a Manager decides it on the Approvals page");
+    at("a refund request is already open: a Manager decides it on the Approvals page", "/approvals");
   } else if (actions.refund.allowed) {
-    next.push(`request a refund of ${formatMoney(refundPosition(order.id).refundableMinor)} (ask: "request a refund for order ${order.id}")`);
+    at(`request a refund of ${formatMoney(refundPosition(order.id).refundableMinor)} (ask: "request a refund for order ${order.id}")`, orderPage);
   }
-  if (actions.reconcile.allowed) next.push("push the cancel upstream from the order page (a refund needs upstream to agree)");
-  if (actions.cancel.allowed) next.push("cancel the order from the order page");
-  if (payment?.status === "failed" && ["shipped", "delivered"].includes(order.status) && ticketCount === 0) next.push("open a support ticket for the unpaid order");
-  if (shipmentStatus === "delayed") next.push("the shipment is delayed: check the workflow runs above");
-  return (next.length ? next : ["nothing to do right now"]).map((n) => ({ text: `Next: ${n}` }));
+  if (actions.reconcile.allowed) at("push the cancel upstream from the order page (a refund needs upstream to agree)", orderPage);
+  if (actions.cancel.allowed) at("cancel the order from the order page", orderPage);
+  if (payment?.status === "failed" && ["shipped", "delivered"].includes(order.status) && ticketCount === 0) at("open a support ticket for the unpaid order", orderPage);
+  if (shipmentStatus === "delayed") at("the shipment is delayed: check the workflow runs above", "/workflows");
+  if (next.length === 0) at("nothing to do right now");
+  return next;
 }
 
 function refundFor(orderId: string, user: AuthUser): Reply {

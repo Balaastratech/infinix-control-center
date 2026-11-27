@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { formatIst } from "@/lib/format";
-import { Alert, Badge, Empty, Skeleton, TableWrap } from "../ui";
+import { auditActionLabel, auditSummary, auditTargetLabel } from "@/lib/labels";
+import { Alert, Badge, Empty, FilterSelect, Skeleton, TableWrap } from "../ui";
 
 interface Entry {
   id: number;
@@ -56,18 +57,8 @@ export function AuditLog() {
   return (
     <section className="card">
       <div className="toolbar">
-        <select aria-label="Action" value={filters.action} onChange={(e) => set("action", e.target.value)}>
-          <option value="">action: any</option>
-          {data?.actions.map((a) => (
-            <option key={a}>{a}</option>
-          ))}
-        </select>
-        <select aria-label="User" value={filters.user} onChange={(e) => set("user", e.target.value)}>
-          <option value="">user: any</option>
-          {data?.users.map((u) => (
-            <option key={u}>{u}</option>
-          ))}
-        </select>
+        <FilterSelect label="Action" value={filters.action} options={data?.actions ?? []} onChange={(v) => set("action", v)} format={auditActionLabel} />
+        <FilterSelect label="User" value={filters.user} options={data?.users ?? []} onChange={(v) => set("user", v)} format={(u) => u} />
       </div>
 
       {error && (
@@ -105,13 +96,19 @@ export function AuditLog() {
                     {e.actorLabel}
                     <small>{e.role ?? "no role"}</small>
                   </td>
-                  <td className="mono">{e.action}</td>
-                  <td>{e.target ?? "-"}</td>
+                  <td>{auditActionLabel(e.action)}</td>
+                  <td>{auditTargetLabel(e.action, e.target)}</td>
                   <td>
                     <Badge status={e.outcome} />
                   </td>
-                  <td style={{ maxWidth: 360, overflowWrap: "anywhere" }}>
-                    <small className="mono">{e.detail ?? "-"}</small>
+                  <td style={{ maxWidth: 420, overflowWrap: "anywhere" }}>
+                    {auditSummary(e.action, e.detail)}
+                    {e.detail && (
+                      <details>
+                        <summary>details</summary>
+                        <pre>{e.detail}</pre>
+                      </details>
+                    )}
                   </td>
                 </tr>
               ))}

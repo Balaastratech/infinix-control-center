@@ -1,5 +1,6 @@
 // Small presentational pieces shared by server and client components. Styling lives in globals.css.
 import type { ReactNode } from "react";
+import { statusLabel } from "@/lib/labels";
 
 export type Tone = "ok" | "warn" | "bad" | "muted" | "info";
 
@@ -43,7 +44,7 @@ export const toneOf = (status: string | null | undefined): Tone => TONES[status 
 
 export function Badge({ status, tone, label }: { status: string | null | undefined; tone?: Tone; label?: string }) {
   if (!status) return <span className="muted">-</span>;
-  return <span className={`badge ${tone ?? toneOf(status)}`}>{label ?? status.replace(/_/g, " ")}</span>;
+  return <span className={`badge ${tone ?? toneOf(status)}`}>{label ?? statusLabel(status)}</span>;
 }
 
 export function Card({ title, count, actions, children, flush }: { title?: ReactNode; count?: number; actions?: ReactNode; children: ReactNode; flush?: boolean }) {
@@ -95,3 +96,26 @@ export function SkeletonCard({ rows = 4 }: { rows?: number }) {
 
 // Wide tables scroll inside their card instead of the page.
 export const TableWrap = ({ children }: { children: ReactNode }) => <div className="table-wrap">{children}</div>;
+
+// A labelled filter: the label sits above, "All" is the empty option, values are shown in words.
+export function FilterSelect({ label, value, options, onChange, format = statusLabel }: {
+  label: string;
+  value: string;
+  options: readonly string[];
+  onChange: (value: string) => void;
+  format?: (value: string) => string;
+}) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">All</option>
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {format(o)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
