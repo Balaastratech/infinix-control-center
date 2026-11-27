@@ -210,6 +210,10 @@ Every business rule in CLAUDE.md maps to at least one test. I also ran the app b
 - Demo accounts are shared publicly, so "private" chats are private per browser, not per person.
 - The production build downloads the Inter font, so it needs network access at build time.
 - Single app instance on SQLite (see section 2).
+- The AI assistant is the weakest part. Simple lookups and "which customer has the most money at risk" work well, but some
+  comparison and "money out today" questions still fall back to a plain fact sentence (the router or the strict
+  anti-fabrication check is too cautious), and heavy testing can use up a user's 15 smart answers for the day.
+  Next step: a better router and grounding that understands comparisons.
 - Sync is manual ("Sync now"); there's no scheduled sync. A service marked down stays down until the next good sync.
 - One Manager can cancel a paid order, the seeded workflow then files the refund as "workflow", and the same Manager
   can approve it. That follows my rule (workflow requests can be approved by any Manager), but a stricter company
