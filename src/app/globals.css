@@ -1112,6 +1112,8 @@ button[aria-busy="true"]::before {
   background: var(--accent-soft);
 }
 .chat-item .chat-title {
+  /* block, not the global inline-flex + centre: ellipsis needs a block box, and centred overflow clips the start */
+  display: block;
   flex: 1;
   min-width: 0;
   overflow: hidden;
