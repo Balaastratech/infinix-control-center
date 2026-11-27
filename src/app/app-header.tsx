@@ -8,16 +8,9 @@ import { SideNav } from "./side-nav";
 
 const SERVICE_NAMES = { commerce: "Commerce API", payments: "Payment API", shipping: "Shipping API" } as const;
 
-// Every logged-in page: sidebar nav, top bar with the user and role, a banner per unreachable service (local DB only),
-// then the page title and content.
-export function AppShell({ user, title, subtitle, crumb, actions, children }: {
-  user: AuthUser;
-  title: ReactNode;
-  subtitle?: ReactNode;
-  crumb?: ReactNode;
-  actions?: ReactNode;
-  children: ReactNode;
-}) {
+// The chrome of every logged-in page, rendered once by app/(app)/layout.tsx so it stays put on navigation: sidebar
+// nav, top bar with the user and role, a banner per unreachable service (local DB only).
+export function AppChrome({ user, children }: { user: AuthUser; children: ReactNode }) {
   const down = getHealth().filter((h) => h.status === "down");
   const pending = listApprovals().filter((a) => a.status === "pending").length;
   return (
@@ -46,18 +39,32 @@ export function AppShell({ user, title, subtitle, crumb, actions, children }: {
             {h.lastError ? ` (${h.lastError})` : ""}
           </p>
         ))}
-        <main className="content">
-          <div className="page-head">
-            <div>
-              {crumb}
-              <h1>{title}</h1>
-              {subtitle && <p>{subtitle}</p>}
-            </div>
-            {actions}
-          </div>
-          {children}
-        </main>
+        <main className="content">{children}</main>
       </div>
     </div>
+  );
+}
+
+// One page inside the chrome: title block, then content. `user` is accepted for older call sites; the layout owns it.
+export function AppShell({ title, subtitle, crumb, actions, children }: {
+  user?: AuthUser;
+  title: ReactNode;
+  subtitle?: ReactNode;
+  crumb?: ReactNode;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          {crumb}
+          <h1>{title}</h1>
+          {subtitle && <p>{subtitle}</p>}
+        </div>
+        {actions}
+      </div>
+      {children}
+    </>
   );
 }

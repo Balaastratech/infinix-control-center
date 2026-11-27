@@ -6,7 +6,7 @@ import { userActor } from "@/server/services/audit";
 import { requestRefund } from "@/server/services/refunds";
 
 // amount_minor in paise; omitted = the full refundable amount. The cap itself is checked in the service.
-const bodySchema = z.object({ amount_minor: z.number().int().positive().optional() });
+const bodySchema = z.object({ amount_minor: z.number().int().positive().optional() }).strict(); // a misspelled amount must not become a full refund
 
 // 201 pending approval · 409 refused by a rule. Never calls the Payment API.
 export async function POST(req: Request, ctx: RouteContext<"/api/orders/[id]/refund-requests">) {

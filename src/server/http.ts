@@ -14,7 +14,10 @@ export async function parseBody<T extends z.ZodType>(req: Request, schema: T): P
   }
   const result = schema.safeParse(body);
   if (!result.success) {
-    return jsonError(400, "invalid request", { issues: result.error.issues.map((i) => ({ path: i.path, message: i.message })) });
+    // Strict schemas: an unknown (e.g. misspelled) field is named, never silently dropped.
+    const unknown = result.error.issues.flatMap((i) => (i.code === "unrecognized_keys" ? i.keys.map((k) => [...i.path, k].join(".")) : []));
+    const error = unknown.length ? `unknown field${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}` : "invalid request";
+    return jsonError(400, error, { issues: result.error.issues.map((i) => ({ path: i.path, message: i.message })) });
   }
   return result.data;
 }

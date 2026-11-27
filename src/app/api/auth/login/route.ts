@@ -8,7 +8,7 @@ import { users } from "@/server/db/schema";
 import { jsonError, parseBody } from "@/server/http";
 import { audit } from "@/server/services/audit";
 
-const LoginBody = z.object({ email: z.string().trim().toLowerCase().email().max(200), password: z.string().min(1).max(200) });
+const LoginBody = z.object({ email: z.string().trim().toLowerCase().email().max(200), password: z.string().min(1).max(200) }).strict();
 
 // 200 logged in · 400 bad body · 401 wrong email or password · 429 too many failures (Retry-After header).
 export async function POST(req: Request) {

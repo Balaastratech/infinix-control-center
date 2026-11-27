@@ -198,6 +198,14 @@ describe("POST /api/orders/[id]/reconcile-cancel (Push cancel upstream)", () => 
 });
 
 describe("POST /api/orders/[id]/refund-requests", () => {
+  it("a misspelled field ({amountMinor}) is a 400 naming the field and creates nothing (never a silent full refund)", async () => {
+    const res = await refund("NC-1002", { amountMinor: 50000 });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("unknown field: amountMinor");
+    expect(opsFor("NC-1002")).toHaveLength(0);
+    expect(db.select().from(approvals).all()).toHaveLength(0);
+  });
+
   it("NC-1005 (processing) is refused", async () => {
     const res = await refund("NC-1005");
     expect(res.status).toBe(409);

@@ -27,6 +27,7 @@ export const eventSchema = z
     order_id: z.string().refine(isValidId, "invalid order id"),
     data: z.record(z.string(), z.unknown()),
   })
+  .strict()
   .superRefine((e, ctx) => {
     const allowed = KNOWN_TYPES[e.type];
     if (allowed && !allowed.includes(e.data.status as string)) {

@@ -5,7 +5,7 @@ import { userActor } from "@/server/services/audit";
 import { rejectRefund } from "@/server/services/approvals";
 import { approvalId, decisionResponse } from "@/server/services/decision-http";
 
-const bodySchema = z.object({ note: z.string().trim().min(1, "a note is required").max(500) });
+const bodySchema = z.object({ note: z.string().trim().min(1, "a note is required").max(500) }).strict();
 
 export async function POST(req: Request, ctx: RouteContext<"/api/approvals/[id]/reject">) {
   const auth = await requireRole(req, MANAGER_ONLY);

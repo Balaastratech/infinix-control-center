@@ -40,6 +40,7 @@ export const PLACEHOLDERS = ["order_id", "amount", "order_status", "payment_stat
 
 const conditionSchema = z
   .object({ field: z.enum(FIELDS), op: z.enum(OPS), value: z.union([z.number(), z.string()]) })
+  .strict()
   .superRefine((c, ctx) => {
     if (c.field === "amount_minor") {
       if (!Number.isSafeInteger(c.value) || (c.value as number) < 0) {
@@ -65,8 +66,8 @@ const reasonSchema = z
   });
 
 const actionSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("create_ticket"), reason: reasonSchema }),
-  z.object({ type: z.literal("request_refund"), amount_minor: z.number().int().positive().optional() }), // omitted = full
+  z.object({ type: z.literal("create_ticket"), reason: reasonSchema }).strict(),
+  z.object({ type: z.literal("request_refund"), amount_minor: z.number().int().positive().optional() }).strict(), // omitted = full
 ]);
 export type WorkflowAction = z.infer<typeof actionSchema>;
 
@@ -76,7 +77,7 @@ export const workflowSchema = z.object({
   conditions: z.array(conditionSchema).min(1).max(10),
   action: actionSchema,
   enabled: z.boolean().default(true),
-});
+}).strict();
 export type WorkflowInput = z.infer<typeof workflowSchema>;
 // enabled re-declared without its default: an edit that omits it must keep the stored value.
 export const workflowPatchSchema = workflowSchema.extend({ enabled: z.boolean() }).partial();
@@ -142,7 +143,8 @@ export function updateWorkflow(id: number, patch: z.infer<typeof workflowPatchSc
   const db = getDb();
   const row = db.select().from(workflows).where(eq(workflows.id, id)).get();
   if (!row) return { ok: false, code: "not_found", reason: "unknown workflow" };
-  const merged = workflowSchema.safeParse({ ...fromDb(row), ...patch });
+  const { name, trigger, conditions, action, enabled } = fromDb(row); // only the editable fields: the schema is strict
+  const merged = workflowSchema.safeParse({ name, trigger, conditions, action, enabled, ...patch });
   if (!merged.success) return { ok: false, code: "invalid", issues: merged.error.issues.map((i) => ({ path: i.path, message: i.message })) };
   if (nameTaken(merged.data.name, id)) return { ok: false, code: "conflict", reason: "a workflow with this name exists" };
   const [updated] = db

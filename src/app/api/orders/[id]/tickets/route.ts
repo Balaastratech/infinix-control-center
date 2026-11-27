@@ -5,7 +5,7 @@ import { jsonError, parseBody } from "@/server/http";
 import { userActor } from "@/server/services/audit";
 import { submitTicket, ticketReasonSchema } from "@/server/services/tickets";
 
-const bodySchema = z.object({ reason: ticketReasonSchema });
+const bodySchema = z.object({ reason: ticketReasonSchema }).strict();
 
 // 201 ticket created (or adopted after a lost reply) · 404 unknown order · 502 Commerce API refused or unreachable.
 export async function POST(req: Request, ctx: RouteContext<"/api/orders/[id]/tickets">) {
