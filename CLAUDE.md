@@ -80,5 +80,5 @@ External API contract and mock quirks: docs/external-apis.md (mock_services.py i
 - Cancels need no approval: Operator or Manager cancels immediately through the API.
 - Refund amount defaults to the full refundable amount; a smaller amount may be entered.
 - Demo users (password demo1234): viewer@nova.test, operator@nova.test, manager@nova.test, manager2@nova.test.
-- Deploy: own server via Cloudflare tunnel (https://novacommerce.balaastratech.com), Node + Python mock as two services, no Docker.
+- Deploy: own server via Cloudflare tunnel (https://novaops.balaastratech.com), Node + Python mock as two services, no Docker.
 - Config from env with local defaults: DATABASE_PATH, MOCK_BASE_URL, PORT, WEBHOOK_SECRET, SESSION_SECRET.

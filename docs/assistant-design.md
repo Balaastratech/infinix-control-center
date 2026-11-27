@@ -286,5 +286,14 @@ Slice (b), 27-11-2026:
 - **`npm run redteam:live -- <url>`:** logs in as the demo users on a deployed server and sends 15 hostile prompts through the real model. It checks for leaks, Viewer proposal cards, unsafe links and claimed actions, and diffs the audit counts before and after. The key never leaves the server. It is manual because it spends real AI questions.
 - **Env:** `ANTHROPIC_API_KEY` (server only), `ASSISTANT_AI`, `ASSISTANT_MODEL`, the two caps and the retention/size limits are documented in `.env.example`.
 
+Slice (c), 27-11-2026:
+- **Login rate limit** (`src/server/auth/login-limit.ts`): 5 failures per 15 min per (IP, email), and 20 per IP, return 429 + `Retry-After`. Failed and rate-limited logins are audited as `auth.login`. There is deliberately **no per-email lockout**: the demo logins are shared and their password is public, so one stranger could otherwise lock everyone out. The IP comes from `CF-Connecting-IP`, which is trustworthy only because the app is reachable through the tunnel alone; keep Node bound to localhost on the server.
+- **CSRF** (`src/proxy.ts`, Next 16's renamed middleware): non-GET `/api/*` requests must carry an Origin matching Host, X-Forwarded-Host or `APP_ORIGIN`, or else `Sec-Fetch-Site: same-origin`. Otherwise 403 `cross-site request refused`. `/api/webhooks` is exempt because it has its own secret. Scripts and curl calls to write routes must send `Origin: <base url>`.
+- **Headers** (`next.config.ts`): CSP (`default-src 'self'`, `frame-ancestors 'none'`, `object-src 'none'`; `'unsafe-inline'` scripts for Next's bootstrap, with a nonce as the upgrade), nosniff, `X-Frame-Options: DENY`, Referrer-Policy, Permissions-Policy, HSTS in production, and no `X-Powered-By`.
+- **Cookies:** session and device cookies are HttpOnly + SameSite=Lax, and Secure in production (tested). Session expiry stays 8 h absolute. Server-side revocation on logout is not built (a `session_version` column is the upgrade).
+
 ## Not built
-(Filled in if a slice runs over its time box. Cut order: 1. rename/delete UI, 2. parser table down to 20 phrasings, 3. AI off in the live demo.)
+Nothing from the cut list was needed: all three slices finished inside their time boxes. Known limits, by design:
+- Logout does not revoke the session seal server-side; the cookie is cleared and the seal expires after 8 h.
+- Burst and login limits are in-memory, per process.
+- CSP allows inline scripts (Next bootstrap) until per-request nonces are added.
