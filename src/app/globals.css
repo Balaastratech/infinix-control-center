@@ -1167,6 +1167,20 @@ button[aria-busy="true"]::before {
   min-width: 0;
   flex: none;
 }
+.answer-reply {
+  font-size: var(--text-lg);
+  line-height: 1.5;
+  margin: 0;
+}
+.answer-details > summary {
+  cursor: pointer;
+  color: var(--accent-text);
+  font-weight: 550;
+  font-size: var(--text-sm);
+}
+.answer-details[open] > summary {
+  margin-bottom: var(--s3);
+}
 .bubble-user {
   align-self: flex-end;
   max-width: min(75%, 560px);

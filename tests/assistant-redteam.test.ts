@@ -111,7 +111,7 @@ function expectNoLeak(payload: unknown) {
 function expectSafeLinks(answer: { blocks: unknown[] }) {
   for (const href of JSON.stringify(answer.blocks).match(/"href":"([^"]*)"/g) ?? []) expect(href.slice(8, -1)).toMatch(SAFE_HREF);
 }
-const toolLog = () => db.select().from(assistantToolCalls).all();
+const toolLog = () => db.select().from(assistantToolCalls).all().filter((c) => c.tool !== "(route)"); // routing bookkeeping row, not a tool call
 const storedMessages = () => db.select().from(assistantMessages).all();
 // Every case ends with these: no business change, no secret in the reply, the stored chat, or anything sent to the model.
 function expectInvariants(before: ReturnType<typeof counts>, reply: unknown) {
@@ -239,7 +239,7 @@ describe("red team: roles, secrets, other users", () => {
     script = [callTools(use("propose_cancel", { order_id: "NC-1005" }), use("propose_refund", { order_id: "NC-1002" })), say("Proposed.")];
     const ai = await ask(NO_MATCH, "viewer@nova.test");
     expect(JSON.stringify(ai.body.answer.blocks)).not.toContain('"kind":"proposal"');
-    expect(toolLog().filter((c) => c.source === "ai" && c.tool !== "(fallback)").map((c) => c.outcome)).toEqual(["denied", "denied"]);
+    expect(toolLog().filter((c) => c.source === "ai" && !c.tool.startsWith("(")).map((c) => c.outcome)).toEqual(["denied", "denied"]);
     const res = await cancelRoute(new Request("http://x", { method: "POST", headers: { cookie: await cookie("viewer@nova.test") } }), { params: Promise.resolve({ id: "NC-1005" }) } as never);
     expect(res.status).toBe(403);
     expectInvariants(before, [parser.body, ai.body]);
@@ -266,7 +266,7 @@ describe("red team: tool abuse and limits", () => {
       ),
     ];
     const r = await ask(NO_MATCH);
-    expect(toolLog().filter((c) => c.source === "ai" && c.tool !== "(fallback)").map((c) => c.outcome)).toEqual(["invalid", "invalid", "invalid"]);
+    expect(toolLog().filter((c) => c.source === "ai" && !c.tool.startsWith("(")).map((c) => c.outcome)).toEqual(["invalid", "invalid", "invalid"]);
     expect(r.body.answer.mode).toBe("fallback");
     expectInvariants(before, r.body);
   });
@@ -306,7 +306,7 @@ describe("red team: tool abuse and limits", () => {
     expect(poem.body.answer.text).toBe(`I don't have that. ${HELP_INTRO}`);
     script = [say("Argentina won the World Cup.")];
     expect((await ask("who won the world cup")).body.answer.intent).toBe("off_topic");
-    expect(toolLog().filter((c) => c.source === "ai" && c.tool !== "(fallback)")).toHaveLength(0);
+    expect(toolLog().filter((c) => c.source === "ai" && !c.tool.startsWith("("))).toHaveLength(0);
   });
 
   it("15. an invented order id and amount in the summary are dropped; the tables stay", async () => {
@@ -335,17 +335,17 @@ describe("AI layer: happy path, fallback, kill switch, caps", () => {
     const r = await ask("anything I should worry about?");
     expect(r.body.answer.mode).toBe("ai");
     expect(r.body.answer.text).toMatch(/^\d+ orders have a failed payment\.$/);
-    expect(r.body.answer.understood).toBe("I understood (AI): looked up find_orders");
+    expect(r.body.answer.understood).toBe("Checked: orders"); // tool names in words
     const next = await ask("which of those are over Rs 10,000?", "operator@nova.test", r.body.conversationId);
     expect(next.body.answer.mode).toBe("parser");
     expect(next.body.answer.understood).toContain("payment failed");
   });
 
-  it("the request is built as documented: non-strict tools, auto tool choice, low effort, bounded tokens", async () => {
+  it("the request is built as documented: non-strict tools, auto tool choice, medium effort, bounded tokens", async () => {
     script = [say("I don't have that.")];
     await ask(NO_MATCH);
     const b = bodies[0];
-    expect(b).toMatchObject({ model: "claude-sonnet-5-5", max_tokens: LIMITS.maxTokens, tool_choice: { type: "auto" }, output_config: { effort: "low" } });
+    expect(b).toMatchObject({ model: "claude-sonnet-5-5", max_tokens: LIMITS.maxTokens, tool_choice: { type: "auto" }, output_config: { effort: "medium" } });
     for (const t of b.tools as Anthropic.Tool[]) {
       // Never strict: strict tool use allows at most 24 optional parameters across all tools; ours have 39, so the API
       // answers 400 "Schemas contains too many optional parameters". Inputs are re-validated by zod on the server.

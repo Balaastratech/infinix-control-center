@@ -11,6 +11,7 @@ import {
   operations,
   orders,
   payments,
+  refunds,
   shipments,
   tickets,
   webhookEvents,
@@ -21,6 +22,7 @@ import {
   SHIPMENT_STATUSES,
 } from "@/server/db/schema";
 import { formatIst, formatMoney } from "@/lib/format";
+import { statusLabel } from "@/lib/labels";
 import type { AuthUser } from "@/server/auth/require-role";
 import { listApprovals } from "./approvals";
 import { getCustomerDetail } from "./customers";
@@ -98,6 +100,8 @@ export const TOOL_SCHEMAS = {
     .strict(),
   health_and_sync: z.object({}).strict(),
   briefing: z.object({}).strict(),
+  customers_at_risk: z.object({}).strict(),
+  refunds_summary: z.object({ from: isoTime.optional(), to: isoTime.optional() }).strict(),
   search_audit: z
     .object({ action: z.string().regex(/^[a-z_]+\.[a-z_]+$/).max(40).optional(), target: z.string().max(40).optional(), actor: z.string().max(100).optional() })
     .strict(),
@@ -139,6 +143,10 @@ export function runTool(name: string, rawInput: unknown, user: AuthUser): ToolRe
       return health();
     case "briefing":
       return briefing();
+    case "customers_at_risk":
+      return customersAtRisk();
+    case "refunds_summary":
+      return refundsSummary(input.from as string | undefined, input.to as string | undefined);
     case "search_audit":
       return searchAudit(input);
     case "propose_cancel":
@@ -359,6 +367,46 @@ function health(): ToolResult {
   }]);
 }
 
+// Per customer: owed refunds (cancelled + captured, not refunded), unpaid shipped/delivered, orders, open tickets.
+function customersAtRisk(): ToolResult {
+  const db = getDb();
+  const owner = new Map(db.select({ id: orders.id, c: orders.customerId }).from(orders).all().map((o) => [o.id, o.c]));
+  const names = new Map(db.select({ id: customers.id, name: customers.name }).from(customers).all().map((c) => [c.id, c.name]));
+  const per = new Map<string, { owed: number; unpaid: number; orders: number; tickets: number }>();
+  const row = (id: string) => per.get(id) ?? per.set(id, { owed: 0, unpaid: 0, orders: 0, tickets: 0 }).get(id)!;
+  for (const o of owedRefunds().orders) { const c = owner.get(o.orderId); if (c) row(c).owed += o.amountMinor; }
+  for (const o of unpaidShipped().orders) { const c = owner.get(o.orderId); if (c) row(c).unpaid += o.amountMinor; }
+  for (const c of owner.values()) if (per.has(c)) row(c).orders++;
+  for (const t of db.select({ orderId: tickets.orderId }).from(tickets).where(eq(tickets.status, "open")).all()) { const c = owner.get(t.orderId); if (c && per.has(c)) row(c).tickets++; }
+  const list = [...per.entries()].map(([id, r]) => ({ id, name: names.get(id) ?? id, ...r, total: r.owed + r.unpaid })).sort((a, b) => b.total - a.total || a.id.localeCompare(b.id));
+  const top = list[0];
+  const said = top
+    ? `${top.name} (${top.id}) has the most money at risk: ${formatMoney(top.total)} (${formatMoney(top.owed)} owed in refunds, ${formatMoney(top.unpaid)} unpaid). ${plural(list.length, "customer")} ${list.length === 1 ? "has" : "have"} money at risk, ${formatMoney(list.reduce((s2, c) => s2 + c.total, 0))} in total.`
+    : "No customer has money at risk.";
+  return result(said, list.length ? [{
+    kind: "table",
+    title: "Customers with money at risk (largest first)",
+    columns: ["Customer", "At risk", "Owed refunds", "Unpaid", "Orders", "Open tickets"],
+    rows: list.map((c) => [{ text: `${c.name} (${c.id})`, href: `/customers/${c.id}` }, formatMoney(c.total), formatMoney(c.owed), formatMoney(c.unpaid), String(c.orders), String(c.tickets)]),
+  }] : []);
+}
+
+// Refunds sent to the Payment API in a time range (UTC ISO; default all time): count and sum, succeeded vs failed.
+function refundsSummary(from: string | undefined, to: string | undefined): ToolResult {
+  const rows = getDb().select().from(refunds).all().filter((r) => (!from || r.createdAt >= from) && (!to || r.createdAt < to));
+  const part = (st: string) => { const x = rows.filter((r) => r.status === st); return { n: x.length, sum: x.reduce((s2, r) => s2 + r.amountMinor, 0) }; };
+  const ok = part("succeeded");
+  const bad = part("failed");
+  const when = from || to ? ` ${from ? `since ${formatIst(from)}` : ""}${from && to ? " and " : ""}${to ? `before ${formatIst(to)}` : ""}` : "";
+  const said = `${plural(ok.n, "refund")} succeeded${when}, ${formatMoney(ok.sum)} paid out; ${plural(bad.n, "refund")} failed (${formatMoney(bad.sum)}).`;
+  return result(said, rows.length ? [{
+    kind: "table",
+    title: "Refunds (newest first)",
+    columns: ["Refund", "Order", "Amount", "Status", "When"],
+    rows: [...rows].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((r) => [r.id, orderCell(r.orderId), formatMoney(r.amountMinor), r.status, formatIst(r.createdAt)]),
+  }] : []);
+}
+
 function briefing(): ToolResult {
   const issues = collectIssues();
   return result(briefingText(issues), issues.length ? [{
@@ -378,13 +426,13 @@ function searchAudit(input: Record<string, unknown>): ToolResult {
   const rows = db.select().from(auditLog).where(cond).orderBy(desc(auditLog.id)).limit(UI_ROWS).all();
   const a = rows[0];
   const said = rows.length
-    ? `${plural(rows.length, "audit entry", "audit entries")}. The latest: ${a.actorLabel}${a.role ? ` (${a.role})` : ""} did ${a.action}${a.target ? ` on ${a.target}` : ""} at ${formatIst(a.at)}, outcome ${a.outcome}.`
+    ? `${plural(rows.length, "audit entry", "audit entries")}. The latest: ${a.actorLabel}${a.role ? ` (${a.role})` : ""} ${statusLabel(a.action).toLowerCase()}${a.target ? ` on ${a.target}` : ""} at ${formatIst(a.at)}, outcome ${a.outcome}.`
     : "No audit entries match.";
   return result(said, rows.length ? [{
     kind: "table",
     title: "Audit log (newest first)",
     columns: ["When", "Who", "Role", "Action", "Target", "Outcome"],
-    rows: rows.map((r) => [formatIst(r.at), r.actorLabel, r.role ?? "-", r.action, r.target && /^NC-\d+$/.test(r.target) ? orderCell(r.target) : (r.target ?? "-"), r.outcome]),
+    rows: rows.map((r) => [formatIst(r.at), r.actorLabel, r.role ?? "-", statusLabel(r.action), r.target && /^NC-\d+$/.test(r.target) ? orderCell(r.target) : (r.target ?? "-"), r.outcome]),
     more: { text: "Open the audit log", href: "/audit" },
   }] : []);
 }

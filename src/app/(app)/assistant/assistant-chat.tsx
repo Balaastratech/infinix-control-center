@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatMoney, parseRupees } from "@/lib/format";
 import { Alert, Empty, TableWrap } from "../../ui";
+import { AnswerDetails, PREVIEW_ROWS } from "./answer-details";
 
 type Cell = string | { text: string; href: string };
 interface Item {
@@ -201,28 +202,35 @@ export function AssistantChat() {
   );
 }
 
+// Reply first; proposal cards stay visible; tables and lists go into a collapsed "Details (n)" section.
 function AnswerCard({ m }: { m: Message }) {
+  const proposals = m.blocks.filter((b) => b.kind === "proposal");
+  const details = m.blocks.filter((b) => b.kind !== "proposal");
   return (
     <section className="card answer">
-      <div className="card-head">
-        <span className="muted small">{m.understood}</span>
-        <span className="muted small">{m.mode === "ai" ? "Smart answer" : "Standard answer"}</span>
-      </div>
       <div className="card-body stack">
-        <h3>{m.text}</h3>
+        <p className="answer-reply">{m.text}</p>
         {m.notice && <Alert tone="warn">{m.notice}</Alert>}
-        {m.blocks.map((b, i) => <BlockView key={i} b={b} />)}
         {m.suggestions && m.suggestions.length > 0 && (
           <ul className="muted">
             {m.suggestions.map((s) => <li key={s}>&ldquo;{s}&rdquo;</li>)}
           </ul>
         )}
+        {proposals.map((b, i) => <BlockView key={`p${i}`} b={b} />)}
+        <AnswerDetails count={details.length}>
+          {details.map((b, i) => <BlockView key={i} b={b} />)}
+        </AnswerDetails>
+        <div className="row muted small" style={{ justifyContent: "space-between" }}>
+          <span>{m.understood}</span>
+          <span>{m.mode === "ai" ? "Smart answer" : "Standard answer"}</span>
+        </div>
       </div>
     </section>
   );
 }
 
 function BlockView({ b }: { b: Block }) {
+  const [all, setAll] = useState(false);
   if (b.kind === "proposal") return <Proposal p={b} />;
   if (b.kind === "list")
     return (
@@ -249,7 +257,7 @@ function BlockView({ b }: { b: Block }) {
               <tr>{b.columns.map((c) => <th key={c}>{c}</th>)}</tr>
             </thead>
             <tbody>
-              {b.rows.map((r, j) => (
+              {(all ? b.rows : b.rows.slice(0, PREVIEW_ROWS)).map((r, j) => (
                 <tr key={j}>
                   {r.map((c, k) => <td key={k}>{typeof c === "string" ? c : <MaybeLink href={c.href}>{c.text}</MaybeLink>}</td>)}
                 </tr>
@@ -257,6 +265,11 @@ function BlockView({ b }: { b: Block }) {
             </tbody>
           </table>
         </TableWrap>
+      )}
+      {b.rows.length > PREVIEW_ROWS && (
+        <button type="button" className="sm" style={{ alignSelf: "flex-start" }} onClick={() => setAll((v) => !v)}>
+          {all ? `Show first ${PREVIEW_ROWS}` : `Show all ${b.rows.length}`}
+        </button>
       )}
       {b.more && <MaybeLink href={b.more.href}>{b.more.text}</MaybeLink>}
     </div>

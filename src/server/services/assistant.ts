@@ -7,6 +7,7 @@ import { audit, userActor } from "./audit";
 import { parse, type AssistantContext } from "./assistant-parser";
 import { runTool } from "./assistant-tools";
 import { answerWithAi, aiConfig } from "./assistant-ai";
+import { route } from "./assistant-router";
 import { aiGate, bumpCounter, recordAiFailure, recordAiSuccess } from "./assistant-breaker";
 import { recordUsage, releaseAiSlot, reserveAiSlot } from "./assistant-usage";
 import { addTurn, createConversation, lastContext, limits, messageCount, recentTurns, type Owner, type StoredAnswer, type ToolLog } from "./conversations";
@@ -88,16 +89,25 @@ async function answer(owner: Owner, id: string, text: string, user: AuthUser): P
   const last = lastContext(owner, id);
   const parsed = answerWithParser(text, user, last);
   recordUsage(user.id, { questions: 1 });
-  if (parsed.answer.intent !== "no_match" || !aiConfig.enabled) return parsed;
+  // Router: simple lookups stay with the parser; judgement questions go to the AI with 1-2 domains' tools only.
+  const r = route(text, parsed.answer.intent, user.role);
+  if (!r.ai) return parsed;
+  // Without the AI, the parser answers and says what it couldn't cover (judgement questions only).
+  const judgement = parsed.answer.intent !== "no_match";
+  const limited: Answer = judgement
+    ? { ...parsed, answer: { ...parsed.answer, notice: "This question asks for a judgement (compare, rank, recommend or total). A standard answer can't do that, so this is the closest lookup." } }
+    : parsed;
+  if (!aiConfig.enabled) return limited;
+  const routeLog: ToolLog = { source: "ai", tool: "(route)", input: { domains: r.domains, tools: r.tools }, outcome: "ok", ms: 0 };
   const fallback = (reason: string, calls: ToolLog[] = []): Answer => {
     bumpCounter(`fallback:${reason}`);
-    return { answer: { ...parsed.answer, mode: "fallback" }, calls: [...calls, { source: "ai", tool: "(fallback)", input: { reason }, outcome: "error", ms: 0 }] };
+    return { answer: { ...limited.answer, mode: "fallback" }, calls: [routeLog, ...calls, { source: "ai", tool: "(fallback)", input: { reason }, outcome: "error", ms: 0 }] };
   };
   const gate = aiGate();
   if (!gate.open) return fallback(`paused_${gate.category}`); // never call the API while paused
   const slot = reserveAiSlot(user.id);
   if (!slot.ok) return { answer: { ...parsed.answer, notice: slot.notice }, calls: parsed.calls };
-  const ai = await answerWithAi({ question: text, user, last, history: recentTurns(owner, id, HISTORY_TURNS), customerNames: customerList().map((c) => c.name) });
+  const ai = await answerWithAi({ question: text, tools: r.tools, user, last, history: recentTurns(owner, id, HISTORY_TURNS), customerNames: customerList().map((c) => c.name) });
   for (const c of ai.calls) {
     if (c.outcome === "denied" || c.outcome === "invalid" || c.outcome === "not_allowed") {
       audit({ ...actorFields(user), action: "assistant.tool", target: c.tool.slice(0, 60), outcome: c.outcome, detail: { source: "ai" } });
@@ -106,7 +116,7 @@ async function answer(owner: Owner, id: string, text: string, user: AuthUser): P
   if (ai.ok) {
     recordAiSuccess();
     if (ai.groundingMiss) bumpCounter("grounding_miss");
-    return { answer: ai.answer, calls: ai.calls };
+    return { answer: ai.answer, calls: [routeLog, ...ai.calls] };
   }
   releaseAiSlot(user.id);
   if (ai.failure) recordAiFailure(ai.failure);
