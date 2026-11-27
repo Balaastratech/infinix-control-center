@@ -5,6 +5,9 @@ NovaCommerce is a growing e-commerce business. Its ops, finance and support team
 for orders (Commerce API), payments (Payment API) and shipments (Shipping API). They switch tools all day,
 reconcile by hand, chase failures and coordinate approvals in chat. We build ONE internal platform that
 syncs the three systems, enforces the business rules, and automates the repetitive work.
+The pain in their own data: 11 cancelled orders still hold a captured payment with no refund (₹1,37,750 owed), and
+4 orders were shipped or delivered with a failed payment (₹51,250 unpaid). Mismatches like these must be visible
+on the dashboard and fixable from the app. Customer outcome first, polish last.
 
 ## Stack
 Next.js App Router + TypeScript · SQLite (better-sqlite3) + Drizzle · zod · iron-session · Vitest + MSW.
@@ -15,9 +18,11 @@ Money is integer paise everywhere (₹5,000 = 500000). Never use floats for mone
 ## Business rules (must never break; enforced in src/server/services, never only in the UI)
 - No cancel if the order is shipped/delivered, or the shipment is shipped/delayed/delivered.
 - Refund only with a captured payment AND an order that is cancelled or delivered.
-  Amount: 0 < amount <= captured minus already refunded. Partial refunds allowed.
+  Amount: 0 < amount <= captured minus non-failed refunds minus amounts in pending/approved requests.
+  Partial refunds allowed.
 - Every refund needs Manager approval before the Payment API is called — workflow refunds too.
-- On approve, re-check the refund rule against current data.
+- On approve, re-read the order and payment from upstream and re-check the rule. Local data can be ahead of
+  upstream (a webhook cancel the mock doesn't know). If they disagree, don't refund; record why.
 - Cancel and refund go through the external APIs. Final state comes from their answer, never assumed:
   a refund reply of HTTP 201 with `status: "failed"` is a failure.
 - Every consequential action writes audit_log: who, role, action, target, outcome.
@@ -42,5 +47,7 @@ Money is integer paise everywhere (₹5,000 = 500000). Never use floats for mone
 - Routes are thin (zod parse → requireRole → service → JSON). All rules live in src/server/services.
 - Every rule has a test, including at least one failure case. Run `npm test` before saying "done".
 - Plain UI: tables, forms, status badges, loading/empty/error states. No styling work.
+  Show money as ₹ with 2 decimals (store paise) and times in IST (store UTC).
+- Must run on a fresh clone with no accounts: setup creates .env.local (random SESSION_SECRET) if missing.
 - Ask me before adding a dependency. Don't change a test to make it pass without telling me why.
 - Stay inside this folder. Never edit files in ./attachments.
