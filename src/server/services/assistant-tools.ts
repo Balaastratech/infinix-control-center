@@ -25,6 +25,7 @@ import type { AuthUser } from "@/server/auth/require-role";
 import { listApprovals } from "./approvals";
 import { getCustomerDetail } from "./customers";
 import { owedRefunds, unpaidShipped } from "./dashboard";
+import { briefingText, collectIssues, HIGH_VALUE_MINOR } from "./briefing";
 import { getHealth } from "./health";
 import { allowedActions, listOrders } from "./orders";
 import { QUEUE_NAMES, getQueues } from "./queues";
@@ -96,6 +97,7 @@ export const TOOL_SCHEMAS = {
     .object({ outcome: z.enum(["skipped", "succeeded", "failed"]).optional(), order_id: orderId.optional(), ran_from: isoTime.optional(), ran_to: isoTime.optional() })
     .strict(),
   health_and_sync: z.object({}).strict(),
+  briefing: z.object({}).strict(),
   search_audit: z
     .object({ action: z.string().regex(/^[a-z_]+\.[a-z_]+$/).max(40).optional(), target: z.string().max(40).optional(), actor: z.string().max(100).optional() })
     .strict(),
@@ -135,6 +137,8 @@ export function runTool(name: string, rawInput: unknown, user: AuthUser): ToolRe
       return workflowRuns(input);
     case "health_and_sync":
       return health();
+    case "briefing":
+      return briefing();
     case "search_audit":
       return searchAudit(input);
     case "propose_cancel":
@@ -146,10 +150,45 @@ export function runTool(name: string, rawInput: unknown, user: AuthUser): ToolRe
 
 // ---------- read tools ----------
 
+// "cancelled orders with a failed payment over ₹5,000.00 for C-003": the filters in words, from the validated input.
+function orderPhrase(f: Record<string, unknown>, count: number): string {
+  const adj = [f.orderStatus, Array.isArray(f.orderStatuses) ? (f.orderStatuses as string[]).join(" or ") : undefined].filter(Boolean).join(" ");
+  const noun = count === 1 ? "order" : "orders";
+  const tail: string[] = [];
+  if (f.paymentStatus === "failed") tail.push("with a failed payment");
+  else if (f.paymentStatus === "captured") tail.push("that are paid");
+  if (f.shipmentStatus) tail.push(`with a ${f.shipmentStatus} shipment`);
+  if (f.localAhead) tail.push("that are ahead of upstream");
+  if (typeof f.minAmountMinor === "number") tail.push(`over ${formatMoney(f.minAmountMinor)}`);
+  if (typeof f.maxAmountMinor === "number") tail.push(`under ${formatMoney(f.maxAmountMinor)}`);
+  if (f.customerId) tail.push(`for ${f.customerId}`);
+  if (f.createdFrom) tail.push(`placed since ${formatIst(f.createdFrom as string)}`);
+  if (f.createdTo) tail.push(`placed before ${formatIst(f.createdTo as string)}`);
+  if (f.q) tail.push(`matching "${String(f.q).slice(0, 40)}"`);
+  if (f.order_ids) tail.push("in your previous result");
+  return [adj, noun, ...tail].filter(Boolean).join(" ");
+}
+
+function ordersSentence(input: Record<string, unknown>, items: { id: string; amountMinor: number }[], total: number): string {
+  const what = orderPhrase(input, total);
+  if (total === 0) return `There are no ${orderPhrase(input, 2)}.`;
+  const parts = [`There ${total === 1 ? "is" : "are"} ${total} ${what}`];
+  if (items.length === total) {
+    if (total > 1) parts[0] += `, worth ${formatMoney(items.reduce((s, o) => s + o.amountMinor, 0))} in total`;
+    if (input.shipmentStatus === "delayed" && input.minAmountMinor === undefined) {
+      const high = items.filter((o) => o.amountMinor > HIGH_VALUE_MINOR).length;
+      parts[0] += `; ${high} ${high === 1 ? "is" : "are"} over ${formatMoney(HIGH_VALUE_MINOR)}`;
+    }
+  }
+  const biggest = [...items].sort((a, b) => b.amountMinor - a.amountMinor)[0];
+  if (total > 1 && biggest) parts.push(`The biggest is ${biggest.id} (${formatMoney(biggest.amountMinor)})`);
+  return `${parts.join(". ")}.`;
+}
+
 function findOrders(input: Record<string, unknown>, countOnly: boolean): ToolResult {
   const { order_ids, ...filters } = input as { order_ids?: string[] } & Record<string, unknown>;
   const page = listOrders({ ...(filters as object), orderIds: order_ids, page: 1, pageSize: UI_ROWS });
-  const title = `${plural(page.total, "order")} found`;
+  const title = ordersSentence(input, page.items, page.total);
   const ids = page.items.map((o) => o.id);
   if (countOnly) return result(title, [], { resultIds: ids, filters: input });
   const rows: Cell[][] = page.items.map((o) => [
@@ -174,7 +213,12 @@ function customerView(customerIdIn: string | undefined, orderId: string | undefi
   if (!customerId) return fail("not_found", `I can't find order ${orderId}. Check the id on the Orders page.`);
   const d = getCustomerDetail(customerId);
   if (!d) return fail("not_found", `I can't find customer ${customerId}.`);
-  return result(`${d.customer.name} (${d.customer.id})`, [
+  const risk = d.moneyAtRisk;
+  const riskText = risk.totalMinor
+    ? ` ${formatMoney(risk.totalMinor)} is at risk (${[risk.owedMinor ? `${formatMoney(risk.owedMinor)} owed in refunds` : "", risk.unpaidMinor ? `${formatMoney(risk.unpaidMinor)} unpaid` : ""].filter(Boolean).join(", ")}).`
+    : " Nothing is at risk.";
+  const said = `${d.customer.name} (${d.customer.id}) has ${plural(d.orders.length, "order")} and has spent ${formatMoney(d.spentMinor)} net.${riskText} ${d.openTickets.length ? `${plural(d.openTickets.length, "open ticket")}.` : "No open tickets."}`;
+  return result(said, [
     {
       kind: "list",
       title: "Customer",
@@ -197,7 +241,13 @@ function customerView(customerIdIn: string | undefined, orderId: string | undefi
 function moneyAtRisk(): ToolResult {
   const owed = owedRefunds();
   const unpaid = unpaidShipped();
-  return result(`Money at risk: ${formatMoney(owed.totalMinor + unpaid.totalMinor)}`, [
+  const all = [...owed.orders, ...unpaid.orders].sort((a, b) => b.amountMinor - a.amountMinor);
+  const said = [
+    owed.count ? `${plural(owed.count, "cancelled order")} still ${owed.count === 1 ? "holds" : "hold"} ${formatMoney(owed.totalMinor)} that hasn't been refunded` : "No cancelled order is waiting for a refund",
+    unpaid.count ? `${plural(unpaid.count, "shipped or delivered order")} worth ${formatMoney(unpaid.totalMinor)} ${unpaid.count === 1 ? "was" : "were"} never paid` : "every shipped or delivered order is paid",
+  ].join(", and ");
+  const title = all.length ? `${said}. The biggest is ${all[0].orderId} (${formatMoney(all[0].amountMinor)}).` : "Nothing is at risk: no owed refunds and no unpaid shipped orders.";
+  return result(title, [
     {
       kind: "table",
       title: `Owed refunds: ${plural(owed.count, "cancelled order")}, ${formatMoney(owed.totalMinor)} captured and not refunded`,
@@ -216,7 +266,11 @@ function moneyAtRisk(): ToolResult {
 function teamQueues(queue: string | undefined): ToolResult {
   const all = getQueues();
   const names = queue ? [queue as keyof typeof all] : QUEUE_NAMES;
-  return result(names.map((n) => `${n}: ${all[n].count}`).join(" · "), names.map((n) => ({
+  const counts = names.map((n) => `${n[0].toUpperCase()}${n.slice(1)} has ${plural(all[n].count, "item")}`).join(", ");
+  const busiest = [...names].sort((a, b) => all[b].count - all[a].count)[0];
+  const top = all[busiest].items[0];
+  const said = `${counts}.${top ? ` First in ${busiest}: ${top.title}${top.orderId ? ` (${top.orderId})` : ""}.` : ""}`;
+  return result(said, names.map((n) => ({
     kind: "table" as const,
     title: `${n[0].toUpperCase()}${n.slice(1)} queue (${all[n].count})`,
     columns: ["Item", "Order", "Detail", "Next"],
@@ -227,7 +281,13 @@ function teamQueues(queue: string | undefined): ToolResult {
 
 function ticketList(input: Record<string, unknown>): ToolResult {
   const r = listTickets({ status: input.status as string | undefined, orderId: input.order_id as string | undefined, customerId: input.customer_id as string | undefined });
-  return result(plural(r.items.length, "ticket"), r.items.length ? [{
+  const scope = [input.status, "ticket"].filter(Boolean).join(" ");
+  const forWhat = input.order_id ? ` for ${input.order_id}` : input.customer_id ? ` for ${input.customer_id}` : "";
+  const newest = r.items[0];
+  const said = r.items.length
+    ? `There ${r.items.length === 1 ? "is" : "are"} ${plural(r.items.length, scope)}${forWhat}. The newest is ${newest.id} on ${newest.orderId} (${newest.status}, ${formatIst(newest.createdAt)}).`
+    : `There are no ${scope}s${forWhat}.`;
+  return result(said, r.items.length ? [{
     kind: "table",
     title: "Tickets",
     columns: ["Ticket", "Order", "Customer", "Status", "Reason", "Created"],
@@ -238,7 +298,14 @@ function ticketList(input: Record<string, unknown>): ToolResult {
 
 function approvalList(status: string): ToolResult {
   const rows = listApprovals().filter((a) => a.status === status);
-  return result(`${plural(rows.length, "refund approval")} ${status}`, rows.length ? [{
+  const total = rows.reduce((s, a) => s + (a.amountMinor ?? 0), 0);
+  const oldest = [...rows].sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+  const said = !rows.length
+    ? `There are no ${status} refund requests.`
+    : status === "pending"
+      ? `${plural(rows.length, "refund request")} worth ${formatMoney(total)} ${rows.length === 1 ? "is" : "are"} waiting for a Manager. The oldest is ${oldest.orderId} (${formatMoney(oldest.amountMinor ?? 0)}), requested by ${oldest.requestedByLabel}.`
+      : `${plural(rows.length, "refund request")} worth ${formatMoney(total)} ${rows.length === 1 ? "was" : "were"} ${status}.`;
+  return result(said, rows.length ? [{
     kind: "table",
     title: "Refund approvals",
     columns: ["Order", "Amount", "Requested by", "Requested", "Status"],
@@ -260,7 +327,12 @@ function workflowRuns(input: Record<string, unknown>): ToolResult {
   if (input.order_id) rows = rows.filter((r) => r.orderId === input.order_id);
   if (input.ran_from) rows = rows.filter((r) => r.ranAt >= (input.ran_from as string));
   if (input.ran_to) rows = rows.filter((r) => r.ranAt < (input.ran_to as string));
-  return result(plural(rows.length, "workflow run"), rows.length ? [{
+  const by = (o: string) => rows.filter((r) => r.outcome === o).length;
+  const latest = rows[0];
+  const said = rows.length
+    ? `${plural(rows.length, "workflow run")}: ${by("succeeded")} succeeded, ${by("skipped")} skipped, ${by("failed")} failed. The latest is ${latest.name}${latest.orderId ? ` on ${latest.orderId}` : ""} (${latest.outcome}, ${formatIst(latest.ranAt)}).`
+    : "No workflow runs match.";
+  return result(said, rows.length ? [{
     kind: "table",
     title: "Workflow runs (newest first)",
     columns: ["Workflow", "Order", "Outcome", "Detail", "Ran"],
@@ -272,13 +344,28 @@ function workflowRuns(input: Record<string, unknown>): ToolResult {
 function health(): ToolResult {
   const rows = getHealth();
   const down = rows.filter((r) => r.status === "down");
-  return result(down.length ? `${plural(down.length, "service")} down: ${down.map((d) => d.service).join(", ")}` : "No service is marked down", [{
+  const NAMES: Record<string, string> = { commerce: "Commerce API", payments: "Payment API", shipping: "Shipping API" };
+  const lastSync = rows.map((r) => r.lastSyncAt).filter((x): x is string => Boolean(x)).sort().at(-1);
+  const syncText = lastSync ? ` The last sync was ${formatIst(lastSync)}.` : " No sync has run yet.";
+  const said = down.length
+    ? `${down.map((d) => NAMES[d.service] ?? d.service).join(" and ")} ${down.length === 1 ? "is" : "are"} unreachable; I'm showing local data.${syncText}`
+    : `All ${rows.length} services are up.${syncText}`;
+  return result(said, [{
     kind: "table",
     title: "Services",
     columns: ["Service", "Status", "Last OK", "Last sync", "Sync result", "Last error"],
     rows: rows.map((r) => [r.service, r.status, formatIst(r.lastOkAt), formatIst(r.lastSyncAt), r.lastSyncStatus ?? "-", r.lastError ?? "-"]),
     more: { text: "Open integrations", href: "/integrations" },
   }]);
+}
+
+function briefing(): ToolResult {
+  const issues = collectIssues();
+  return result(briefingText(issues), issues.length ? [{
+    kind: "list",
+    title: "What needs attention (most urgent first)",
+    items: issues.map((i) => ({ text: `${i.sentence[0].toUpperCase()}${i.sentence.slice(1)}`, href: i.href })),
+  }] : []);
 }
 
 function searchAudit(input: Record<string, unknown>): ToolResult {
@@ -289,7 +376,11 @@ function searchAudit(input: Record<string, unknown>): ToolResult {
     input.actor ? eq(auditLog.actorLabel, input.actor as string) : undefined,
   );
   const rows = db.select().from(auditLog).where(cond).orderBy(desc(auditLog.id)).limit(UI_ROWS).all();
-  return result(plural(rows.length, "audit entry", "audit entries"), rows.length ? [{
+  const a = rows[0];
+  const said = rows.length
+    ? `${plural(rows.length, "audit entry", "audit entries")}. The latest: ${a.actorLabel}${a.role ? ` (${a.role})` : ""} did ${a.action}${a.target ? ` on ${a.target}` : ""} at ${formatIst(a.at)}, outcome ${a.outcome}.`
+    : "No audit entries match.";
+  return result(said, rows.length ? [{
     kind: "table",
     title: "Audit log (newest first)",
     columns: ["When", "Who", "Role", "Action", "Target", "Outcome"],
@@ -323,7 +414,16 @@ function investigate(id: string): ToolResult {
   if (payment?.upstreamStatus && payment.status !== payment.upstreamStatus) ahead.push(`payment is ${payment.status} locally but ${payment.upstreamStatus} upstream`);
   const list = (label: string, rows: string[]): Item => ({ text: rows.length ? `${label}: ${rows.join("; ")}` : `${label}: none` });
 
-  return result(`Order ${id} (from local data)`, [
+  const actions = allowedActions(order);
+  const pay = !payment ? "has no payment on record" : payment.status === "captured" ? "paid" : `its payment ${payment.status}`;
+  const ship = shipment ? `the shipment is ${shipment.status}` : "there is no shipment yet";
+  const can = [actions.cancel.allowed && "cancel it", actions.refund.allowed && "request a refund", actions.reconcile.allowed && "push the cancel upstream"].filter(Boolean) as string[];
+  const said = [
+    `${id} is ${order.status} and ${pay}; ${ship}.`,
+    ahead.length ? `Local data is ahead of upstream: ${ahead.join("; ")}.` : "",
+    can.length ? `You can ${can.join(" or ")}.` : "",
+  ].filter(Boolean).join(" ");
+  return result(said, [
     {
       kind: "list",
       title: "Facts",

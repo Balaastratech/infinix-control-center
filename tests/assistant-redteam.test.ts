@@ -330,7 +330,7 @@ describe("AI layer: happy path, fallback, kill switch, caps", () => {
   it("a grounded summary is kept; its order list becomes the follow-up context for the parser", async () => {
     script = [callTools(use("find_orders", { paymentStatus: "failed" })), (body) => {
       const result = JSON.parse(((body.messages.at(-1)!.content as Anthropic.ToolResultBlockParam[])[0].content as string));
-      return say(`${result.title.split(" ")[0]} orders have a failed payment.`)();
+      return say(`${/\d+/.exec(result.title)![0]} orders have a failed payment.`)(); // title is now a sentence: "There are N …"
     }];
     const r = await ask("anything I should worry about?");
     expect(r.body.answer.mode).toBe("ai");

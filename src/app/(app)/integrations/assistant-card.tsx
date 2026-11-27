@@ -24,8 +24,18 @@ const CATEGORY: Record<string, string> = { usage_limit: "usage limit", outage: "
 const TONE = { available: "ok", paused: "warn", degraded: "warn", off: "muted" } as const;
 
 export function AssistantCard() {
-  const [h, setH] = useState<AiHealth | null>(null);
+  const [h, setH] = useState<(AiHealth & { canResume?: boolean }) | null>(null);
   const [failed, setFailed] = useState(false);
+  const [resume, setResume] = useState<{ busy?: boolean; error?: string }>({});
+
+  // Manager only (the route returns 403 otherwise): clear the pause after the limit was raised. Audited.
+  async function resumeSmartAnswers() {
+    setResume({ busy: true });
+    const res = await fetch("/api/assistant/resume", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => null);
+    if (!res?.ok) return setResume({ error: "Could not resume smart answers. Please try again." });
+    setH({ ...(await res.json()), canResume: true });
+    setResume({});
+  }
   useEffect(() => {
     fetch("/api/assistant/health")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error())))
@@ -38,9 +48,15 @@ export function AssistantCard() {
   return (
     <Card title="Assistant">
       <div className="stack">
-        <span>
+        <div className="row" style={{ justifyContent: "space-between" }}>
           <Badge status={h.status} tone={TONE[h.status]} label={h.label} />
-        </span>
+          {h.canResume && (h.status === "paused" || h.status === "degraded") && (
+            <button type="button" className="sm" disabled={resume.busy} aria-busy={resume.busy} onClick={resumeSmartAnswers}>
+              Resume smart answers
+            </button>
+          )}
+        </div>
+        {resume.error && <span className="small error">{resume.error}</span>}
         <span className="small">
           Today: {h.aiAnswers} of {h.cap} smart answers · {h.standardAnswers} standard answers · {h.groundingMisses} summaries removed by the grounding check
         </span>

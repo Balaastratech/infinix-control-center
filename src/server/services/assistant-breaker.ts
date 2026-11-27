@@ -93,6 +93,15 @@ export function recordAiSuccess(now = new Date()): void {
   if (s.status !== "available") write({ status: "available", category: null, pausedUntil: null }, s, now);
 }
 
+// A Manager clears a pause or degraded state by hand (e.g. after the usage limit was raised). Audited as that Manager.
+export function resumeAi(actor: { id: number; email: string; role: string }, now = new Date()): { from: string } {
+  const s = read();
+  const row = { ...s, id: 1, status: "available" as const, category: null, pausedUntil: null, updatedAt: now.toISOString() };
+  getDb().insert(assistantAiState).values(row).onConflictDoUpdate({ target: assistantAiState.id, set: row }).run();
+  audit({ userId: actor.id, actorLabel: actor.email, role: actor.role, action: "assistant.ai_resume", target: "assistant", outcome: "available", detail: { from: s.status, category: s.category, until: s.pausedUntil } });
+  return { from: s.status };
+}
+
 export function recordAiFailure(f: Failure, now = new Date()): void {
   const s = read();
   const err = { lastErrorAt: now.toISOString(), lastErrorCategory: f.category };

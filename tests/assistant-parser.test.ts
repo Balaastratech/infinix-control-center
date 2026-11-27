@@ -58,6 +58,13 @@ const TABLE: [string, string, Record<string, unknown>][] = [
   ["reject refund NC-1005", "list_approvals", { status: "pending" }],
   ["cancel NC-1001 and refund NC-1002", "propose_cancel", { order_id: "NC-1001" }],
   ["late orders; open tickets", "find_orders", { shipmentStatus: "delayed" }],
+  // briefing: open questions
+  ["what's our biggest problem", "briefing", {}],
+  ["how are we doing", "briefing", {}],
+  ["what needs attention", "briefing", {}],
+  ["summary of today", "briefing", {}],
+  ["anything urgent?", "briefing", {}],
+  ["what should I focus on", "briefing", {}],
 ];
 
 describe("assistant parser: phrasing table", () => {
@@ -177,4 +184,12 @@ describe("assistant parser: batch 2 gaps", () => {
     expect(p.question).toMatch(/^I can help with orders/);
     expect(p.suggestions).toHaveLength(3);
   });
+});
+
+describe("assistant parser: briefing does not swallow specific questions", () => {
+  it.each([
+    ["orders placed today", "find_orders"],
+    ["money at risk", "money_at_risk"],
+    ["investigate order NC-1004", "investigate_order"],
+  ])("%s -> %s", (text, tool) => expect(run(text).call?.tool).toBe(tool));
 });

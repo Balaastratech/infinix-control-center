@@ -63,6 +63,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   list_approvals: "Refund approval requests by status (default pending).",
   workflow_runs: "Recent workflow executions, optionally by outcome, order, or ran time range in UTC ISO (ran_from, ran_to).",
   health_and_sync: "Status of the Commerce, Payment and Shipping APIs and the last sync.",
+  briefing: "Open issues ranked by urgency and money (money at risk, unpaid shipments, delayed high-value shipments, failed refunds, pending approvals, services down, local-ahead orders). Use for open questions like how are we doing.",
   search_audit: "Audit log entries (who did what), filtered by action like order.cancel or refund.approve, target order id, or actor email.",
   propose_cancel: "Propose cancelling an order. Shows a card the user must confirm; nothing is executed.",
   propose_refund: "Propose a refund request (amount in paise, default full refundable). The user confirms; then a Manager must approve. Nothing is executed.",

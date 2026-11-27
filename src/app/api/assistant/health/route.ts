@@ -5,5 +5,5 @@ import { aiHealth } from "@/server/services/assistant-breaker";
 export async function GET(req: Request) {
   const auth = await requireRole(req, ANY_ROLE);
   if (auth instanceof Response) return auth;
-  return Response.json(aiHealth());
+  return Response.json({ ...aiHealth(), canResume: auth.role === "manager" });
 }

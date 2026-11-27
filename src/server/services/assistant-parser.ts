@@ -45,6 +45,7 @@ export const HELP_INTRO =
   "I can help with orders, customers, money at risk, refunds and approvals, tickets, team queues, workflow runs, service health and the audit log. Try one of these:";
 
 export const HELP = [
+  "what needs attention",
   "money at risk",
   "late orders over Rs 5,000",
   "how many cancelled orders this week",
@@ -267,6 +268,10 @@ function parseOne(raw: string, last: AssistantContext | null, customers: Custome
 
   if (/^(help|\?|what can you do)/.test(t)) return { intent: "help", understood: "I understood: a request for help", suggestions: HELP };
 
+  // Open questions -> a ranked briefing ("what's our biggest problem", "how are we doing", "summary of today").
+  if (!orderId && /\b(biggest (problem|issue|risk)s?|how are (we|things) doing|how's (it|business) going|needs? (my |our )?attention|what should (i|we) (do|look at|focus on|worry about)|anything urgent|summary|overview|briefing|brief me|status report|state of things)\b/.test(t))
+    return tool("briefing", {}, ["a briefing: open issues ranked by urgency and money"]);
+
   const asksWho = /\bwho\b|\bby whom\b/.test(t);
 
   // Approving or rejecting is never done here: point to the Approvals queue (Managers decide there), no new proposal.
@@ -319,7 +324,7 @@ function parseOne(raw: string, last: AssistantContext | null, customers: Custome
               : /\bworkflow/.test(t)
                 ? "workflow.update"
                 : undefined;
-    if (asksWho && !action && !orderId && !/audit/.test(t)) return noMatch(t); // "who won the world cup"
+    if (asksWho && !action && !orderId && !/\baudit\b/.test(t)) return noMatch(t); // "who won the world cup"
     const input: Record<string, unknown> = {};
     if (action) input.action = action;
     if (orderId) input.target = orderId;
