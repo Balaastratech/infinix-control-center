@@ -341,13 +341,15 @@ describe("AI layer: happy path, fallback, kill switch, caps", () => {
     expect(next.body.answer.understood).toContain("payment failed");
   });
 
-  it("the request is built as documented: strict tools, auto tool choice, low effort, bounded tokens", async () => {
+  it("the request is built as documented: non-strict tools, auto tool choice, low effort, bounded tokens", async () => {
     script = [say("I don't have that.")];
     await ask(NO_MATCH);
     const b = bodies[0];
     expect(b).toMatchObject({ model: "claude-sonnet-5-5", max_tokens: LIMITS.maxTokens, tool_choice: { type: "auto" }, output_config: { effort: "low" } });
     for (const t of b.tools as Anthropic.Tool[]) {
-      expect(t.strict).toBe(true);
+      // Never strict: strict tool use allows at most 24 optional parameters across all tools; ours have 39, so the API
+      // answers 400 "Schemas contains too many optional parameters". Inputs are re-validated by zod on the server.
+      expect(t).not.toHaveProperty("strict");
       expect(JSON.stringify(t.input_schema)).not.toMatch(/"(minimum|maximum|minLength|maxLength|pattern|\$schema)"/);
       expect((t.input_schema as { additionalProperties?: boolean }).additionalProperties).toBe(false);
     }

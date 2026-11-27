@@ -70,8 +70,10 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   propose_ticket: "Propose a support ticket for an order with a short reason. The user confirms; nothing is executed.",
 };
 
-// JSON Schema for the API from the same zod schemas the server validates with. Strict tool use rejects numeric and
-// length constraints, so those are stripped here and enforced by zod on the server.
+// JSON Schema for the API from the same zod schemas the server validates with. Numeric/length constraints are stripped
+// (the server enforces them with zod before any tool runs). Tools are NOT `strict`: strict tool use caps optional
+// parameters across the tool list at 24 and ours have 39, so the API rejected every request with a 400. Safety does not
+// depend on strict: every tool input is re-validated by TOOL_SCHEMAS on the server.
 const UNSUPPORTED = new Set(["$schema", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "minLength", "maxLength", "pattern", "minItems", "maxItems", "format"]);
 function apiSchema(node: unknown): unknown {
   if (Array.isArray(node)) return node.map(apiSchema);
@@ -85,7 +87,6 @@ export const TOOL_DEFS: Anthropic.Tool[] = (Object.keys(TOOL_SCHEMAS) as ToolNam
   name,
   description: DESCRIPTIONS[name],
   input_schema: apiSchema(z.toJSONSchema(TOOL_SCHEMAS[name])) as Anthropic.Tool.InputSchema,
-  strict: true,
 }));
 
 // ---------- what the model sees of a tool result: data only, capped ----------

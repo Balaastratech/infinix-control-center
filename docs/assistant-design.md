@@ -106,7 +106,7 @@ Checked against the current Anthropic SDK docs (claude-api skill, TypeScript):
 - **Model:** `ASSISTANT_MODEL`, default `claude-sonnet-5-5`.
 - **Effort:** `output_config: { effort: "low" }`, so thinking stays at the model default.
 - **Forced tool calls are not used.** Sonnet 5.5 returns 400 for forced `tool_choice` `any`/`tool`, so the design uses `tool_choice: auto`, and the prompt steers the model to call tools.
-- **Every tool is `strict: true`** with `additionalProperties: false`, so tool inputs match their schemas.
+- **Tools are not `strict`** (strict tool use allows at most 24 optional parameters across the tool list; ours have 39 and the API returned 400). Schemas still set `additionalProperties: false`, and every input is re-validated by zod on the server.
 
 **Loop**
 - **Manual loop with `client.messages.create`**, not the beta Tool Runner. Reasons: no beta dependency, hard per-question caps, and every tool call collected for logging and grounding.
@@ -278,7 +278,7 @@ Slice (b), 27-11-2026:
 - **No-tool AI replies:** a reply that used no tool is always replaced by the fixed line "I can only help with NovaCommerce operations, and I don't have that." plus suggestions. This is stricter than the design's "≤ 200 chars and grounded" rule: a short poem would have passed that.
 - **Results list:** every AI answer starts with a "Results" list holding each tool's own headline (counts, refusal reasons, role denials), then the tool tables. The model's summary sits above them, and only if it passes the check.
 - **Grounding check extras:** it also drops summaries that claim an action ("I have cancelled…"), claim a role change ("you are now admin"), contain a secret value, quote the system prompt, or exceed 400 chars. The answer then carries a notice saying the summary was removed.
-- **Strict tool schemas:** the JSON Schema sent to the API is generated from the same zod schemas, with the constraints strict tool use rejects stripped out (`minimum`/`maximum`, `minLength`/`maxLength`, `pattern`, `minItems`/`maxItems`, `format`). The server still enforces all of them with zod before running a tool.
+- **Tool schemas:** the JSON Schema sent to the API is generated from the same zod schemas, with numeric/length constraints stripped out (`minimum`/`maximum`, `minLength`/`maxLength`, `pattern`, `minItems`/`maxItems`, `format`). The server still enforces all of them with zod before running a tool.
 - **Caps:** an AI slot is reserved per AI attempt and is not refunded if the call then fails. Questions and tokens are counted per user per IST day in `assistant_usage`.
 - **Refusal fallback:** the server-side `fallbacks` beta is not used, as proposed. Refusals fall back to the parser.
 - **Test seam:** `setCreateMessageForTests()` in `assistant-ai.ts`. The real SDK client is created lazily, only when a question actually reaches the AI with a key set. A test checks that a missing key or `ASSISTANT_AI=off` means no model call.

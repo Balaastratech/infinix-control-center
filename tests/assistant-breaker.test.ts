@@ -61,6 +61,7 @@ describe("classify", () => {
     ["timeout", new APIUserAbortError(), "outage", undefined],
     ["400 that is not a usage limit", usageError(400, "messages: invalid"), "other", undefined],
     ["a plain Error", new Error("boom"), "other", undefined],
+    ["400 too many optional parameters (strict tools)", usageError(400, "Schemas contains too many optional parameters (39), which would make grammar compilation inefficient (limit: 24)"), "other", undefined],
   ])("%s", (_label, err, category, until) => {
     const f = classify(err, NOW);
     expect(f.category).toBe(category);
