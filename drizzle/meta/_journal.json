@@ -29,6 +29,13 @@
       "when": 1795785236604,
       "tag": "0003_assistant",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1795790630409,
+      "tag": "0004_assistant_breaker",
+      "breakpoints": true
     }
   ]
 }

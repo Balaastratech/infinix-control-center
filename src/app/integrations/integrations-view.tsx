@@ -6,6 +6,7 @@ import { formatIst } from "@/lib/format";
 import { statusLabel } from "@/lib/labels";
 import type { EventRow } from "@/server/services/dashboard";
 import type { ServiceStatus } from "@/server/services/health";
+import { AssistantCard } from "./assistant-card";
 import { Alert, Badge, Card, Empty, FilterSelect, SkeletonCard, TableWrap } from "../ui";
 
 interface SyncRun {
@@ -84,6 +85,8 @@ export function IntegrationsView() {
           ))}
         </div>
       </Card>
+
+      <AssistantCard />
 
       <Card title="Sync runs" count={data.syncRuns.length} flush>
         {data.syncRuns.length === 0 ? (

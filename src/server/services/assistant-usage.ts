@@ -55,3 +55,12 @@ export function recordUsage(userId: number, delta: { questions?: number; inputTo
     })
     .run();
 }
+
+// A failed or skipped AI call gives its slot back: only real AI answers count against the caps.
+export function releaseAiSlot(userId: number, now = new Date()): void {
+  getDb()
+    .update(assistantUsage)
+    .set({ aiQuestions: sql`max(${assistantUsage.aiQuestions} - 1, 0)` })
+    .where(and(eq(assistantUsage.day, istDay(now)), eq(assistantUsage.userId, userId)))
+    .run();
+}

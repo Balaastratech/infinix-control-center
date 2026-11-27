@@ -67,6 +67,7 @@ const orderFilters = z
   .object({
     q: z.string().trim().min(1).max(100).optional(),
     orderStatus: z.enum(ORDER_STATUSES).optional(),
+    orderStatuses: z.array(z.enum(ORDER_STATUSES)).max(ORDER_STATUSES.length).optional(),
     paymentStatus: z.enum(PAYMENT_STATUSES).optional(),
     shipmentStatus: z.enum(SHIPMENT_STATUSES).optional(),
     localAhead: z.boolean().optional(),
@@ -82,13 +83,18 @@ const orderFilters = z
 export const TOOL_SCHEMAS = {
   find_orders: orderFilters,
   count_orders: orderFilters,
-  get_customer: z.object({ customer_id: z.string().regex(/^C-\d{1,6}$/) }).strict(),
+  get_customer: z
+    .object({ customer_id: z.string().regex(/^C-\d{1,6}$/).optional(), order_id: orderId.optional() })
+    .strict()
+    .refine((v) => Boolean(v.customer_id) !== Boolean(v.order_id), "give a customer id or an order id"),
   investigate_order: z.object({ order_id: orderId }).strict(),
   money_at_risk: z.object({}).strict(),
   team_queues: z.object({ queue: z.enum(QUEUE_NAMES).optional() }).strict(),
   list_tickets: z.object({ status: z.enum(["open", "closed"]).optional(), order_id: orderId.optional(), customer_id: z.string().regex(/^C-\d{1,6}$/).optional() }).strict(),
   list_approvals: z.object({ status: z.enum(["pending", "approved", "rejected"]).optional() }).strict(),
-  workflow_runs: z.object({ outcome: z.enum(["skipped", "succeeded", "failed"]).optional(), order_id: orderId.optional() }).strict(),
+  workflow_runs: z
+    .object({ outcome: z.enum(["skipped", "succeeded", "failed"]).optional(), order_id: orderId.optional(), ran_from: isoTime.optional(), ran_to: isoTime.optional() })
+    .strict(),
   health_and_sync: z.object({}).strict(),
   search_audit: z
     .object({ action: z.string().regex(/^[a-z_]+\.[a-z_]+$/).max(40).optional(), target: z.string().max(40).optional(), actor: z.string().max(100).optional() })
@@ -114,7 +120,7 @@ export function runTool(name: string, rawInput: unknown, user: AuthUser): ToolRe
     case "count_orders":
       return findOrders(input, true);
     case "get_customer":
-      return customerView(input.customer_id as string);
+      return customerView(input.customer_id as string | undefined, input.order_id as string | undefined);
     case "investigate_order":
       return investigate(input.order_id as string);
     case "money_at_risk":
@@ -163,7 +169,9 @@ function findOrders(input: Record<string, unknown>, countOnly: boolean): ToolRes
   return result(title, blocks, { resultIds: ids, filters: input });
 }
 
-function customerView(customerId: string): ToolResult {
+function customerView(customerIdIn: string | undefined, orderId: string | undefined): ToolResult {
+  const customerId = customerIdIn ?? getDb().select({ c: orders.customerId }).from(orders).where(eq(orders.id, orderId!)).get()?.c;
+  if (!customerId) return fail("not_found", `I can't find order ${orderId}. Check the id on the Orders page.`);
   const d = getCustomerDetail(customerId);
   if (!d) return fail("not_found", `I can't find customer ${customerId}.`);
   return result(`${d.customer.name} (${d.customer.id})`, [
@@ -250,6 +258,8 @@ function workflowRuns(input: Record<string, unknown>): ToolResult {
     .all();
   if (input.outcome) rows = rows.filter((r) => r.outcome === input.outcome);
   if (input.order_id) rows = rows.filter((r) => r.orderId === input.order_id);
+  if (input.ran_from) rows = rows.filter((r) => r.ranAt >= (input.ran_from as string));
+  if (input.ran_to) rows = rows.filter((r) => r.ranAt < (input.ran_to as string));
   return result(plural(rows.length, "workflow run"), rows.length ? [{
     kind: "table",
     title: "Workflow runs (newest first)",

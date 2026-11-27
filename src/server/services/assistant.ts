@@ -7,7 +7,8 @@ import { audit, userActor } from "./audit";
 import { parse, type AssistantContext } from "./assistant-parser";
 import { runTool } from "./assistant-tools";
 import { answerWithAi, aiConfig } from "./assistant-ai";
-import { recordUsage, reserveAiSlot } from "./assistant-usage";
+import { aiGate, bumpCounter, recordAiFailure, recordAiSuccess } from "./assistant-breaker";
+import { recordUsage, releaseAiSlot, reserveAiSlot } from "./assistant-usage";
 import { addTurn, createConversation, lastContext, limits, messageCount, recentTurns, type Owner, type StoredAnswer, type ToolLog } from "./conversations";
 
 export interface Answer {
@@ -21,7 +22,7 @@ export function answerWithParser(text: string, user: AuthUser, last: AssistantCo
   const p = parse(text, last, customerList());
   if (!p.call) {
     return {
-      answer: { text: p.question ?? "Here is what I can do:", mode: "parser", intent: p.intent, understood: p.understood, blocks: [], suggestions: p.suggestions, context: last },
+      answer: { text: p.question ?? "Here is what I can do:", mode: "parser", intent: p.intent, understood: p.understood, blocks: [], suggestions: p.suggestions, notice: p.notice, context: last },
       calls: [],
     };
   }
@@ -39,6 +40,7 @@ export function answerWithParser(text: string, user: AuthUser, last: AssistantCo
       intent: p.intent,
       understood: p.understood,
       blocks: r.blocks,
+      notice: p.notice,
       // Only order lists can be referred back to; anything else keeps the previous list as the follow-up context.
       context: isList && r.outcome === "ok" ? { intent: p.intent, filters: stripIds(r.filters), resultIds: r.resultIds } : last,
     },
@@ -79,13 +81,20 @@ export type AskOutcome =
 
 const HISTORY_TURNS = 6;
 
-// Parser first (free, deterministic). Only a question the parser can't place goes to the AI, if it is on and the daily
-// caps allow; any AI failure falls back to the parser's answer with a note.
+// Parser first (free, deterministic). Only a question the parser can't place goes to the AI, if it is on, the circuit
+// breaker is closed and the daily caps allow. Any AI failure falls back quietly to the parser's answer (mode
+// "fallback", shown as "Standard answer"); failed or skipped calls give their cap slot back.
 async function answer(owner: Owner, id: string, text: string, user: AuthUser): Promise<Answer> {
   const last = lastContext(owner, id);
   const parsed = answerWithParser(text, user, last);
   recordUsage(user.id, { questions: 1 });
   if (parsed.answer.intent !== "no_match" || !aiConfig.enabled) return parsed;
+  const fallback = (reason: string, calls: ToolLog[] = []): Answer => {
+    bumpCounter(`fallback:${reason}`);
+    return { answer: { ...parsed.answer, mode: "fallback" }, calls: [...calls, { source: "ai", tool: "(fallback)", input: { reason }, outcome: "error", ms: 0 }] };
+  };
+  const gate = aiGate();
+  if (!gate.open) return fallback(`paused_${gate.category}`); // never call the API while paused
   const slot = reserveAiSlot(user.id);
   if (!slot.ok) return { answer: { ...parsed.answer, notice: slot.notice }, calls: parsed.calls };
   const ai = await answerWithAi({ question: text, user, last, history: recentTurns(owner, id, HISTORY_TURNS), customerNames: customerList().map((c) => c.name) });
@@ -94,11 +103,14 @@ async function answer(owner: Owner, id: string, text: string, user: AuthUser): P
       audit({ ...actorFields(user), action: "assistant.tool", target: c.tool.slice(0, 60), outcome: c.outcome, detail: { source: "ai" } });
     }
   }
-  if (ai.ok) return { answer: ai.answer, calls: ai.calls };
-  return {
-    answer: { ...parsed.answer, mode: "fallback", notice: "AI unavailable for this question, so this is the built-in answer." },
-    calls: [...ai.calls, { source: "ai", tool: "(fallback)", input: { reason: ai.reason }, outcome: "error", ms: 0 }],
-  };
+  if (ai.ok) {
+    recordAiSuccess();
+    if (ai.groundingMiss) bumpCounter("grounding_miss");
+    return { answer: ai.answer, calls: ai.calls };
+  }
+  releaseAiSlot(user.id);
+  if (ai.failure) recordAiFailure(ai.failure);
+  return fallback(ai.reason, ai.calls);
 }
 
 export async function ask(owner: Owner, user: AuthUser, text: string, conversationId: string | null): Promise<AskOutcome> {

@@ -9,7 +9,7 @@ const run = (text: string, last: AssistantContext | null = null) => parse(text, 
 const TABLE: [string, string, Record<string, unknown>][] = [
   ["late orders", "find_orders", { shipmentStatus: "delayed" }],
   ["show stuck shipments over 5k", "find_orders", { shipmentStatus: "delayed", minAmountMinor: 500000 }],
-  ["unpaid shipped orders", "find_orders", { paymentStatus: "failed", orderStatus: "shipped" }],
+  ["unpaid shipped orders", "find_orders", { paymentStatus: "failed", orderStatuses: ["shipped", "delivered"] }],
   ["orders with payment failed", "find_orders", { paymentStatus: "failed" }],
   ["how many cancelled orders this week", "count_orders", { orderStatus: "cancelled", createdFrom: "2026-11-13T18:30:00.000Z" }],
   ["orders between Rs 2,000 and Rs 10,000", "find_orders", { minAmountMinor: 199999, maxAmountMinor: 1000001 }],
@@ -45,6 +45,19 @@ const TABLE: [string, string, Record<string, unknown>][] = [
   ["refund 500 for NC-1002", "propose_refund", { order_id: "NC-1002", amount_minor: 50000 }],
   ["refund 1,250.50 rs for NC-1002", "propose_refund", { order_id: "NC-1002", amount_minor: 125050 }],
   ["create a ticket for NC-1007 because customer never paid", "propose_ticket", { order_id: "NC-1007", reason: "customer never paid" }],
+  // batch 2 gaps
+  ["who is the customer for NC-1003", "get_customer", { order_id: "NC-1003" }],
+  ["any integration errors?", "health_and_sync", {}],
+  ["delayd shipmnts", "find_orders", { shipmentStatus: "delayed" }],
+  ["what workflows ran today", "workflow_runs", { ran_from: "2026-11-19T18:30:00.000Z" }],
+  ["failed workflow runs yesterday", "workflow_runs", { outcome: "failed", ran_from: "2026-11-18T18:30:00.000Z", ran_to: "2026-11-19T18:30:00.000Z" }],
+  ["shipped but not paid", "find_orders", { paymentStatus: "failed", orderStatuses: ["shipped", "delivered"] }],
+  ["don't cancel NC-1002, just show it", "investigate_order", { order_id: "NC-1002" }],
+  ["do not refund NC-1002", "investigate_order", { order_id: "NC-1002" }],
+  ["approve the refund for NC-1005", "list_approvals", { status: "pending" }],
+  ["reject refund NC-1005", "list_approvals", { status: "pending" }],
+  ["cancel NC-1001 and refund NC-1002", "propose_cancel", { order_id: "NC-1001" }],
+  ["late orders; open tickets", "find_orders", { shipmentStatus: "delayed" }],
 ];
 
 describe("assistant parser: phrasing table", () => {
@@ -111,5 +124,57 @@ describe("assistant parser: amounts are integer paise", () => {
   it("rejects zero and junk", () => {
     expect(amountToPaise("0")).toBeNull();
     expect(amountToPaise("1.234")).toBeNull();
+  });
+});
+
+describe("assistant parser: batch 2 gaps", () => {
+  it("customer for an order is the customer view, but 'who cancelled' is still the audit log", () => {
+    expect(run("who is the customer for NC-1003").call?.tool).toBe("get_customer");
+    expect(run("who cancelled NC-1003").call?.tool).toBe("search_audit");
+  });
+
+  it("'workflow errors' is workflow runs, not health; 'orders with errors' is not health either", () => {
+    expect(run("workflow errors").call?.tool).toBe("workflow_runs");
+    expect(run("orders with errors").call?.tool).not.toBe("health_and_sync");
+  });
+
+  it("typos are fixed only for known keywords, never names, and not on a tie", async () => {
+    const { fixTypos } = await import("@/server/services/assistant-parser");
+    expect(fixTypos("delayd shipmnts")).toBe("delayed shipments");
+    expect(fixTypos("cancled ordrs")).toBe("canceled orders");
+    expect(fixTypos("refundz")).toBe("refundz"); // 1 edit from both refund and refunds: a tie, left alone
+    expect(fixTypos("refunded delivery")).toBe("refunded delivery"); // known words are left alone
+    expect(run("orders for Demo Customer 3").call?.input).toMatchObject({ customerId: "C-003" });
+    expect(run("blorp the frobnicator").intent).toBe("no_match");
+  });
+
+  it("negation removes only the negated action: 'don't cancel NC-1002, just refund it' proposes the refund", () => {
+    const show = run("don't cancel NC-1002, just show it");
+    expect(show.call?.tool).toBe("investigate_order");
+    expect(JSON.stringify(show)).not.toContain("propose_");
+    expect(run("don't cancel NC-1002, just refund it").call?.tool).toBe("propose_refund");
+  });
+
+  it("approve requests point to the Approvals page with a note and never make a proposal", () => {
+    const p = run("approve the refund for NC-1005");
+    expect(p.call).toEqual({ tool: "list_approvals", input: { status: "pending" } });
+    expect(p.notice).toMatch(/Approvals page/);
+    expect(run("who approved refunds").call?.tool).toBe("search_audit"); // the audit question still works
+    expect(run("approved refunds").call?.tool).toBe("list_approvals");
+  });
+
+  it("two requests: answers the first and says one request at a time; one request with 'and' is untouched", () => {
+    const p = run("cancel NC-1001 and refund NC-1002");
+    expect(p.call?.tool).toBe("propose_cancel");
+    expect(p.notice).toMatch(/one request at a time/i);
+    const one = run("orders between Rs 2,000 and Rs 10,000");
+    expect(one.notice).toBeUndefined();
+    expect(run("late orders and then nonsense words").notice).toBeUndefined(); // the second part isn't a request
+  });
+
+  it("unknown text: what I can help with plus 3 examples", () => {
+    const p = run("blorp the frobnicator");
+    expect(p.question).toMatch(/^I can help with orders/);
+    expect(p.suggestions).toHaveLength(3);
   });
 });

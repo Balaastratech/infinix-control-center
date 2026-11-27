@@ -3,6 +3,7 @@ import { ANY_ROLE, requireRole } from "@/server/auth/require-role";
 import { ensureDevice } from "@/server/auth/device";
 import { jsonError, parseBody } from "@/server/http";
 import { ask } from "@/server/services/assistant";
+import { aiStatusForUser } from "@/server/services/assistant-breaker";
 import { limits, listConversations } from "@/server/services/conversations";
 
 const withCookie = (res: Response, setCookie?: string) => {
@@ -10,12 +11,13 @@ const withCookie = (res: Response, setCookie?: string) => {
   return res;
 };
 
-// My conversations (this user, this browser). Sets the device cookie on first use.
+// My conversations (this user, this browser), plus whether smart answers are paused and how many I have left today.
+// Sets the device cookie on first use.
 export async function GET(req: Request) {
   const auth = await requireRole(req, ANY_ROLE);
   if (auth instanceof Response) return auth;
   const { device, setCookie } = ensureDevice(req);
-  return withCookie(Response.json({ conversations: listConversations({ userId: auth.id, device }), maxChars: limits.maxChars }), setCookie);
+  return withCookie(Response.json({ conversations: listConversations({ userId: auth.id, device }), maxChars: limits.maxChars, ai: aiStatusForUser(auth.id) }), setCookie);
 }
 
 // Start a conversation with its first question. 200 answer · 400 bad input · 429 burst limit.

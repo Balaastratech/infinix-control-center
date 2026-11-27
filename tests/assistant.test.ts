@@ -216,7 +216,7 @@ describe("assistant: answers from local data", () => {
   it("count of unpaid shipped orders matches the data", async () => {
     const r = await ask("how many unpaid shipped orders");
     expect(r.body.answer.text).toMatch(/^\d+ orders? found$/);
-    expect(r.body.answer.understood).toBe("I understood: count orders · payment failed · order shipped");
+    expect(r.body.answer.understood).toBe("I understood: count orders · payment failed · order shipped or delivered");
   });
 
   it("unknown text says it didn't understand and suggests questions", async () => {

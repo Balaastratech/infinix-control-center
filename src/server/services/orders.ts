@@ -22,6 +22,7 @@ const NOT_CANCELLABLE_SHIPMENT = ["shipped", "delayed", "delivered"];
 export interface OrderListQuery {
   q?: string;
   orderStatus?: string;
+  orderStatuses?: string[]; // any of these (assistant: "shipped but not paid" = shipped or delivered)
   paymentStatus?: string;
   shipmentStatus?: string;
   localAhead?: boolean;
@@ -56,6 +57,7 @@ export function listOrders(query: OrderListQuery) {
     );
   }
   if (query.orderStatus) where.push(eq(orders.status, query.orderStatus));
+  if (query.orderStatuses?.length) where.push(inArray(orders.status, query.orderStatuses));
   if (query.paymentStatus) where.push(eq(payments.status, query.paymentStatus));
   if (query.shipmentStatus) where.push(eq(shipments.status, query.shipmentStatus));
   if (query.localAhead) where.push(localAhead);

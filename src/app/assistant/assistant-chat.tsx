@@ -33,6 +33,13 @@ interface ConversationRow {
   updatedAt: string;
 }
 
+const SOMETHING_WRONG = "Something went wrong. Please try again.";
+interface AiStatus {
+  enabled: boolean;
+  paused: boolean;
+  remaining: number;
+}
+
 const STARTERS = ["money at risk", "late orders over Rs 5,000", "refunds waiting for approval", "investigate order NC-1004", "what's in the finance queue", "is any service down"];
 const SAFE_HREF = /^\/(orders|customers|approvals|tickets|queues|workflows|integrations|audit)(\/|\?|$)/;
 const safe = (href?: string) => (href && SAFE_HREF.test(href) ? href : undefined);
@@ -46,8 +53,8 @@ async function call(method: string, url: string, body?: unknown) {
     const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
     const data = await res.json().catch(() => ({}));
     return { ok: res.ok, status: res.status, data };
-  } catch (e) {
-    return { ok: false, status: 0, data: { error: `Could not reach the server: ${(e as Error).message}` } };
+  } catch {
+    return { ok: false, status: 0, data: { error: "Could not reach the server. Check your connection and try again." } };
   }
 }
 
@@ -59,13 +66,15 @@ export function AssistantChat() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [maxChars, setMaxChars] = useState(500);
+  const [ai, setAi] = useState<AiStatus | null>(null);
 
   const loadList = useCallback(async () => {
     const r = await call("GET", "/api/assistant/conversations");
     if (r.ok) {
       setList(r.data.conversations);
       setMaxChars(r.data.maxChars);
-    } else setError(r.data.error ?? `HTTP ${r.status}`);
+      setAi(r.data.ai ?? null);
+    } else setError(r.data.error ?? SOMETHING_WRONG);
   }, []);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch
@@ -75,7 +84,7 @@ export function AssistantChat() {
   async function open(id: string) {
     setError(null);
     const r = await call("GET", `/api/assistant/conversations/${id}`);
-    if (!r.ok) return setError(r.data.error ?? `HTTP ${r.status}`);
+    if (!r.ok) return setError(r.data.error ?? SOMETHING_WRONG);
     setCurrent(id);
     setMessages(r.data.messages);
   }
@@ -89,7 +98,7 @@ export function AssistantChat() {
       ? await call("POST", `/api/assistant/conversations/${current}/messages`, { text: q })
       : await call("POST", "/api/assistant/conversations", { text: q });
     setBusy(false);
-    if (!r.ok) return setError(r.data.error ?? `HTTP ${r.status}`);
+    if (!r.ok) return setError(r.data.error ?? SOMETHING_WRONG);
     const a = r.data.answer;
     setMessages((m) => [...m, { id: `u${Date.now()}`, role: "user", text: q, blocks: [] }, { id: `a${Date.now()}`, role: "assistant", ...a }]);
     setText("");
@@ -102,14 +111,14 @@ export function AssistantChat() {
     const title = window.prompt("Rename conversation", c.title)?.trim();
     if (!title) return;
     const r = await call("PATCH", `/api/assistant/conversations/${c.id}`, { title });
-    if (!r.ok) setError(r.data.error ?? `HTTP ${r.status}`);
+    if (!r.ok) setError(r.data.error ?? SOMETHING_WRONG);
     void loadList();
   }
 
   async function remove(c: ConversationRow) {
     if (!window.confirm(`Delete "${c.title}"?`)) return;
     const r = await call("DELETE", `/api/assistant/conversations/${c.id}`);
-    if (!r.ok) return setError(r.data.error ?? `HTTP ${r.status}`);
+    if (!r.ok) return setError(r.data.error ?? SOMETHING_WRONG);
     if (current === c.id) {
       setCurrent(null);
       setMessages([]);
@@ -142,6 +151,7 @@ export function AssistantChat() {
       </section>
 
       <div className="stack">
+        {ai?.paused && <p className="muted small" role="status">Smart answers are paused right now. Standard answers still work.</p>}
         {messages.length === 0 && (
           <section className="card">
             <div className="card-body">
@@ -170,6 +180,7 @@ export function AssistantChat() {
                 {busy ? "Working…" : "Ask"}
               </button>
             </form>
+            {ai?.enabled && !ai.paused && <p className="muted small" style={{ marginTop: 6 }}>Smart answers left today: {ai.remaining}</p>}
           </div>
         </section>
       </div>
@@ -182,7 +193,7 @@ function AnswerCard({ m, onAsk, busy }: { m: Message; onAsk: (q: string) => void
     <section className="card answer">
       <div className="card-head">
         <span className="muted small">{m.understood}</span>
-        <span className="badge">{m.mode === "ai" ? "AI" : m.mode === "fallback" ? "Built-in (AI unavailable)" : "Built-in"}</span>
+        <span className="muted small">{m.mode === "ai" ? "Smart answer" : "Standard answer"}</span>
       </div>
       <div className="card-body stack">
         <h3>{m.text}</h3>
@@ -264,7 +275,7 @@ function Proposal({ p }: { p: Extract<Block, { kind: "proposal" }> }) {
     }
     setState({ busy: true });
     const r = await call("POST", url, body);
-    setState(r.ok ? { done: p.action === "refund" ? "Refund request created. It now waits for Manager approval." : p.action === "cancel" ? "Order cancelled." : "Ticket created." } : { error: r.data.error ?? `HTTP ${r.status}` });
+    setState(r.ok ? { done: p.action === "refund" ? "Refund request created. It now waits for Manager approval." : p.action === "cancel" ? "Order cancelled." : "Ticket created." } : { error: r.data.error ?? SOMETHING_WRONG });
   }
 
   return (

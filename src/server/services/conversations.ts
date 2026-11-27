@@ -2,7 +2,7 @@
 // to the owner (user id + browser device id). Not yours = null -> the route answers 404, so ids never leak.
 // docs/assistant-design.md sections 1-2.
 import crypto from "node:crypto";
-import { and, asc, count, desc, eq, gte, lt } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { getDb } from "@/server/db";
 import { assistantConversations, assistantMessages, assistantToolCalls, auditLog } from "@/server/db/schema";
 import type { AssistantContext } from "./assistant-parser";
@@ -75,7 +75,7 @@ export function listConversations(owner: Owner) {
     .select({ id: assistantConversations.id, title: assistantConversations.title, updatedAt: assistantConversations.updatedAt })
     .from(assistantConversations)
     .where(mine(owner))
-    .orderBy(desc(assistantConversations.updatedAt))
+    .orderBy(desc(assistantConversations.updatedAt), desc(sql`rowid`))
     .all();
 }
 
@@ -84,7 +84,7 @@ export function createConversation(owner: Owner, firstQuestion: string): { id: s
   const db = getDb();
   purgeOld();
   return db.transaction(() => {
-    const existing = db.select({ id: assistantConversations.id }).from(assistantConversations).where(mine(owner)).orderBy(asc(assistantConversations.updatedAt)).all();
+    const existing = db.select({ id: assistantConversations.id }).from(assistantConversations).where(mine(owner)).orderBy(asc(assistantConversations.updatedAt), asc(sql`rowid`)).all(); // ms timestamps tie: rowid = creation order
     const excess = existing.length - limits.maxConversations + 1;
     for (const c of existing.slice(0, Math.max(0, excess))) db.delete(assistantConversations).where(mine(owner, c.id)).run();
     const id = crypto.randomUUID();

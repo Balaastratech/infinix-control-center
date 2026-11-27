@@ -6,6 +6,7 @@ import { formatMoney } from "@/lib/format";
 export interface OrderFilters {
   q?: string;
   orderStatus?: string;
+  orderStatuses?: string[];
   paymentStatus?: string;
   shipmentStatus?: string;
   localAhead?: boolean;
@@ -37,7 +38,11 @@ export interface Parsed {
   understood: string;
   suggestions?: string[];
   question?: string; // ambiguity / no-match text
+  notice?: string; // a quiet note shown with the answer ("one request at a time", "approve on the Approvals page")
 }
+
+export const HELP_INTRO =
+  "I can help with orders, customers, money at risk, refunds and approvals, tickets, team queues, workflow runs, service health and the audit log. Try one of these:";
 
 export const HELP = [
   "money at risk",
@@ -181,6 +186,44 @@ function statuses(t: string): { filters: OrderFilters; parts: string[]; conflict
   return { filters: f, parts };
 }
 
+// ---------- typo tolerance (known keywords only) ----------
+
+// Words the parser keys on. A word of 5+ letters not in this list that is 1 edit away (2 for 7+ letters) from exactly
+// one of them is read as it; anything else is left alone, so names, ids and amounts are never "corrected".
+const VOCAB = [
+  "late", "stuck", "delayed", "unpaid", "captured", "cancelled", "canceled", "shipped", "delivered", "processing",
+  "order", "orders", "shipment", "shipments", "payment", "payments", "purchases", "refund", "refunds", "ticket", "tickets",
+  "approval", "approvals", "approved", "approve", "rejected", "pending", "waiting", "workflow", "workflows", "automation",
+  "automations", "queue", "queues", "finance", "support", "operations", "health", "service", "services", "outage",
+  "integration", "integrations", "errors", "customer", "customers", "money", "audit", "history", "cancel", "investigate",
+  "today", "yesterday", "between", "above", "below", "under", "unreachable", "mismatch", "failed", "succeeded", "skipped",
+  // known words that are not keywords, so they are never "corrected" into one
+  "delivery", "refunded", "shipping", "cancelling", "cancellation", "approver", "stock",
+];
+const VOCAB_SET = new Set(VOCAB);
+
+function editDistance(a: string, b: string): number {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+export function fixTypos(t: string): string {
+  return t.replace(/[a-z]{5,}/g, (w) => {
+    if (VOCAB_SET.has(w)) return w;
+    const max = w.length >= 7 ? 2 : 1;
+    const scored = VOCAB.filter((v) => Math.abs(v.length - w.length) <= max).map((v) => ({ v, d: editDistance(w, v) })).filter((x) => x.d <= max);
+    if (scored.length === 0) return w;
+    const best = Math.min(...scored.map((x) => x.d));
+    const top = scored.filter((x) => x.d === best);
+    return top.length === 1 ? top[0].v : w; // a tie is a guess: leave it
+  });
+}
+
 // ---------- main ----------
 
 const FOLLOW_UP_REF = /\b(those|these|them|of them|which ones|the same|that list)\b/;
@@ -200,17 +243,51 @@ const tool = (intent: string, input: Record<string, unknown>, understood: string
   understood: `I understood: ${understood.join(" · ")}`,
 });
 
+// Two requests in one message ("cancel NC-1001 and refund NC-1002", "late orders; open tickets"): answer the first only.
+const SPLIT = /\s*(?:;|\?\s+(?=\S)|\s(?:and then|then|also)\s|\s+and\s+(?=(?:cancel|refund|show|list|create|open|raise|investigate|who|how many|what|which|approve|reject|count|find)\b))\s*/i;
+
 export function parse(raw: string, last: AssistantContext | null, customers: CustomerRef[], now = new Date()): Parsed {
+  const parts = raw.split(SPLIT).map((x) => x.trim()).filter(Boolean);
+  if (parts.length > 1) {
+    const second = parseOne(parts.slice(1).join(" "), null, customers, now);
+    if (second.call || second.intent === "ambiguous") {
+      const first = parseOne(parts[0], last, customers, now);
+      return { ...first, notice: "One request at a time: I answered the first one. Ask the next one on its own." };
+    }
+  }
+  return parseOne(raw, last, customers, now);
+}
+
+function parseOne(raw: string, last: AssistantContext | null, customers: CustomerRef[], now: Date): Parsed {
   const text = raw.trim().replace(/\s+/g, " ");
-  const t = text.toLowerCase();
+  const lower = text.toLowerCase();
+  const t = fixTypos(lower);
   const oid = ORDER_ID.exec(text);
   const orderId = oid ? `NC-${oid[1] ?? oid[2]}` : null;
 
   if (/^(help|\?|what can you do)/.test(t)) return { intent: "help", understood: "I understood: a request for help", suggestions: HELP };
 
+  const asksWho = /\bwho\b|\bby whom\b/.test(t);
+
+  // Approving or rejecting is never done here: point to the Approvals queue (Managers decide there), no new proposal.
+  if (!asksWho && /\b(approve|reject|deny|decline)\b/.test(t) && (orderId || /\brefunds?\b/.test(t))) {
+    return {
+      ...tool("list_approvals", { status: "pending" }, ["approving or rejecting a refund happens on the Approvals page, by a Manager", "showing pending requests"]),
+      notice: "Refunds are approved or rejected on the Approvals page by a Manager who did not request them. The assistant can't approve.",
+    };
+  }
+
+  // "who is the customer for NC-1003" / "customer of NC-1003": the customer, not the audit log.
+  if (orderId && /\bcustomer\b/.test(t) && !/\b(cancel|refund|approv|reject|ticket|audit)/.test(t)) {
+    return tool("get_customer", { order_id: orderId }, [`the customer of order ${orderId}`]);
+  }
+
+  // Negation: "don't cancel NC-1002, just show it" -> the negated action words don't count as a request.
+  const ta = t.replace(/\b(?:don'?t|do not|never|no need to|not)\s+(?:\w+\s+){0,2}?(?:cancel|refund|create|open|raise)\w*/g, " ");
+
   // Actions: proposals only (a Confirm button does the real request).
-  if (orderId && /\bcancel\b/.test(t) && !/\bwho\b/.test(t)) return tool("propose_cancel", { order_id: orderId }, [`cancel order ${orderId} (needs your confirmation)`]);
-  if (orderId && /\b(refund)\b/.test(t) && !/\bwho\b|\bstatus\b|\binvestigate\b/.test(t)) {
+  if (orderId && /\bcancel\b/.test(ta) && !/\bwho\b/.test(t)) return tool("propose_cancel", { order_id: orderId }, [`cancel order ${orderId} (needs your confirmation)`]);
+  if (orderId && /\b(refund)\b/.test(ta) && !/\bwho\b|\bstatus\b|\binvestigate\b/.test(t)) {
     const rest = text.replace(oid![0], " ");
     const amountMinor = refundAmount(rest);
     return tool("propose_refund", amountMinor ? { order_id: orderId, amount_minor: amountMinor } : { order_id: orderId }, [
@@ -219,7 +296,7 @@ export function parse(raw: string, last: AssistantContext | null, customers: Cus
       "needs your confirmation, then Manager approval",
     ]);
   }
-  if (orderId && /\b(ticket)\b/.test(t) && /\b(create|open|raise|file|make|new|add)\b/.test(t)) {
+  if (orderId && /\b(ticket)\b/.test(ta) && /\b(create|open|raise|file|make|new|add)\b/.test(ta)) {
     const reason = /(?:because|reason:?|saying|:)\s*(.{3,})$/i.exec(text)?.[1]?.trim();
     return tool("propose_ticket", { order_id: orderId, reason: (reason ?? `Follow-up on ${orderId} (raised from the assistant)`).slice(0, 200) }, [
       `support ticket for ${orderId}`,
@@ -228,7 +305,6 @@ export function parse(raw: string, last: AssistantContext | null, customers: Cus
   }
 
   // Audit: "who cancelled NC-1004", "who approved refunds", "audit for NC-1002".
-  const asksWho = /\bwho\b|\bby whom\b/.test(t);
   if (asksWho || /\baudit\b|\bhistory of\b/.test(t)) {
     const action = /\bapprov/.test(t)
       ? "refund.approve"
@@ -250,7 +326,7 @@ export function parse(raw: string, last: AssistantContext | null, customers: Cus
     return tool("search_audit", input, ["audit log", action ? `action ${action}` : "any action", orderId ? `on ${orderId}` : "any target"]);
   }
 
-  if (/\b(health|down|outage|unreachable|services?|apis?|sync|synced|syncing|up\b)/.test(t) && !orderId && !/\borders?\b/.test(t))
+  if (/\b(health|down|outage|unreachable|services?|apis?|sync|synced|syncing|integrations?|errors?|failing|up\b)/.test(t) && !orderId && !/\borders?\b|\bworkflows?\b|\bautomations?\b/.test(t))
     return tool("health_and_sync", {}, ["service health and last sync"]);
   if (/\bat risk\b|\bowed\b|\bmoney\b/.test(t) && !/\borders?\b.*\b(over|under|between)\b/.test(t)) return tool("money_at_risk", {}, ["money at risk (owed refunds + unpaid orders)"]);
   if (/\bapprov|\bwaiting\b|\bpending refunds?\b/.test(t)) {
@@ -271,7 +347,12 @@ export function parse(raw: string, last: AssistantContext | null, customers: Cus
   }
   if (/\bworkflows?\b|\bautomations?\b|\bruns?\b/.test(t)) {
     const outcome = /\bfail/.test(t) ? "failed" : /\bskip/.test(t) ? "skipped" : /\bsucce/.test(t) ? "succeeded" : undefined;
-    return tool("workflow_runs", outcome ? { outcome } : {}, ["workflow runs", outcome ?? "any outcome"]);
+    const when = dates(t, now);
+    const input: Record<string, unknown> = {};
+    if (outcome) input.outcome = outcome;
+    if (when.from) input.ran_from = when.from;
+    if (when.to) input.ran_to = when.to;
+    return tool("workflow_runs", input, ["workflow runs", outcome ?? "any outcome", when.label ? `ran ${when.label}` : "any time"]);
   }
   if (orderId) return tool("investigate_order", { order_id: orderId }, [`investigate order ${orderId}`]);
 
@@ -287,7 +368,7 @@ export function parse(raw: string, last: AssistantContext | null, customers: Cus
   }
   const amt = amounts(t);
   const dt = dates(t, now);
-  const found = customerMatches(t, customers);
+  const found = customerMatches(lower, customers);
   if (found.length > 1) {
     return {
       intent: "ambiguous",
@@ -299,6 +380,12 @@ export function parse(raw: string, last: AssistantContext | null, customers: Cus
   const customer = found[0];
   const counting = /\bhow many\b|\bcount\b|\bnumber of\b|\btotal\b/.test(t);
   const filters: OrderFilters = { ...st.filters, ...amt };
+  // "shipped but not paid" means the order left the warehouse: shipped or delivered (as on the dashboard).
+  if (filters.orderStatus === "shipped" && filters.paymentStatus === "failed") {
+    delete filters.orderStatus;
+    filters.orderStatuses = ["shipped", "delivered"];
+    st.parts[st.parts.indexOf("order shipped")] = "order shipped or delivered";
+  }
   if (dt.from) filters.createdFrom = dt.from;
   if (dt.to) filters.createdTo = dt.to;
   if (customer) filters.customerId = customer.id;
@@ -335,6 +422,7 @@ function describe(f: OrderFilters): string[] {
   if (f.paymentStatus) out.push(`payment ${f.paymentStatus}`);
   if (f.localAhead) out.push("local ahead");
   if (f.orderStatus) out.push(`order ${f.orderStatus}`);
+  if (f.orderStatuses) out.push(`order ${f.orderStatuses.join(" or ")}`);
   if (f.minAmountMinor !== undefined) out.push(`amount over ${formatMoney(f.minAmountMinor)}`);
   if (f.maxAmountMinor !== undefined) out.push(`amount under ${formatMoney(f.maxAmountMinor)}`);
   if (f.createdFrom) out.push(`placed from ${f.createdFrom.slice(0, 16)} UTC`);
@@ -344,5 +432,5 @@ function describe(f: OrderFilters): string[] {
 }
 
 function noMatch(t: string): Parsed {
-  return { intent: "no_match", understood: "I understood: nothing I can look up", question: "I didn't understand that. Try one of these:", suggestions: suggest(t) };
+  return { intent: "no_match", understood: "I understood: nothing I can look up", question: HELP_INTRO, suggestions: suggest(t) };
 }

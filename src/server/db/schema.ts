@@ -386,3 +386,26 @@ export const assistantUsage = sqliteTable(
   },
   (t) => [uniqueIndex("assistant_usage_day_user").on(t.day, t.userId)],
 );
+
+// AI circuit breaker: one row (id 1), so a pause survives restarts. services/assistant-breaker.ts owns it.
+export const AI_STATES = ["available", "paused", "degraded"] as const;
+export const assistantAiState = sqliteTable("assistant_ai_state", {
+  id: integer("id").primaryKey(),
+  status: text("status", { enum: AI_STATES }).notNull().default("available"),
+  category: text("category"), // usage_limit | outage | refusal | other (the failure that set the status)
+  pausedUntil: text("paused_until"),
+  lastErrorAt: text("last_error_at"),
+  lastErrorCategory: text("last_error_category"),
+  updatedAt: text("updated_at").notNull().default(now),
+});
+
+// Daily counters per IST day for the Integrations card: "fallback:<reason>", "grounding_miss".
+export const assistantCounters = sqliteTable(
+  "assistant_counters",
+  {
+    day: text("day").notNull(),
+    key: text("key").notNull(),
+    n: integer("n").notNull().default(0),
+  },
+  (t) => [uniqueIndex("assistant_counters_day_key").on(t.day, t.key)],
+);
