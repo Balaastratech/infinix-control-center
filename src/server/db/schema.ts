@@ -318,3 +318,71 @@ export const auditLog = sqliteTable(
   },
   (t) => [index("audit_log_at_idx").on(t.at)],
 );
+
+// ---------- assistant (docs/assistant-design.md) ----------
+// Conversations are private: every query filters on (owner_user_id, owner_device). Only services/conversations.ts
+// touches these tables.
+
+export const ASSISTANT_MODES = ["parser", "ai", "fallback"] as const;
+
+export const assistantConversations = sqliteTable(
+  "assistant_conversations",
+  {
+    id: text("id").primaryKey(), // random UUID
+    ownerUserId: integer("owner_user_id")
+      .notNull()
+      .references(() => users.id),
+    ownerDevice: text("owner_device").notNull(),
+    title: text("title").notNull(),
+    createdAt: text("created_at").notNull().default(now),
+    updatedAt: text("updated_at").notNull().default(now),
+  },
+  (t) => [index("assistant_conversations_owner_idx").on(t.ownerUserId, t.ownerDevice, t.updatedAt)],
+);
+
+export const assistantMessages = sqliteTable(
+  "assistant_messages",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => assistantConversations.id, { onDelete: "cascade" }),
+    role: text("role", { enum: ["user", "assistant"] }).notNull(),
+    text: text("text").notNull(),
+    mode: text("mode", { enum: ASSISTANT_MODES }),
+    intent: text("intent"),
+    understood: text("understood"),
+    blocks: text("blocks"), // JSON Block[]
+    context: text("context"), // JSON follow-up context
+    createdAt: text("created_at").notNull().default(now),
+  },
+  (t) => [index("assistant_messages_conversation_idx").on(t.conversationId, t.id)],
+);
+
+export const assistantToolCalls = sqliteTable("assistant_tool_calls", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  conversationId: text("conversation_id")
+    .notNull()
+    .references(() => assistantConversations.id, { onDelete: "cascade" }),
+  source: text("source", { enum: ["parser", "ai"] }).notNull(),
+  tool: text("tool").notNull(),
+  input: text("input"),
+  outcome: text("outcome").notNull(), // ok | invalid | denied | error | not_allowed
+  ms: integer("ms").notNull().default(0),
+  at: text("at").notNull().default(now),
+});
+
+export const assistantUsage = sqliteTable(
+  "assistant_usage",
+  {
+    day: text("day").notNull(), // IST date
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    questions: integer("questions").notNull().default(0),
+    aiQuestions: integer("ai_questions").notNull().default(0),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+  },
+  (t) => [uniqueIndex("assistant_usage_day_user").on(t.day, t.userId)],
+);

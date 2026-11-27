@@ -1,6 +1,6 @@
 // Orders: list/search, detail (with a live shipment lookup), and cancel through the Commerce API.
 // Cancel rule: CLAUDE.md "Business rules". Cancels need no approval.
-import { and, asc, desc, eq, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, lt, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { orderPath, request } from "@/server/clients/mock";
 import { getDb } from "@/server/db";
@@ -26,6 +26,11 @@ export interface OrderListQuery {
   shipmentStatus?: string;
   localAhead?: boolean;
   customerId?: string;
+  minAmountMinor?: number; // exclusive ("over")
+  maxAmountMinor?: number; // exclusive ("under")
+  createdFrom?: string; // UTC ISO, inclusive
+  createdTo?: string; // UTC ISO, exclusive
+  orderIds?: string[]; // restrict to these (assistant follow-ups)
   page: number;
   pageSize: number;
 }
@@ -55,6 +60,11 @@ export function listOrders(query: OrderListQuery) {
   if (query.shipmentStatus) where.push(eq(shipments.status, query.shipmentStatus));
   if (query.localAhead) where.push(localAhead);
   if (query.customerId) where.push(eq(orders.customerId, query.customerId));
+  if (query.minAmountMinor !== undefined) where.push(gt(orders.amountMinor, query.minAmountMinor));
+  if (query.maxAmountMinor !== undefined) where.push(lt(orders.amountMinor, query.maxAmountMinor));
+  if (query.createdFrom) where.push(gte(orders.createdAt, query.createdFrom));
+  if (query.createdTo) where.push(lt(orders.createdAt, query.createdTo));
+  if (query.orderIds) where.push(query.orderIds.length ? inArray(orders.id, query.orderIds) : sql`0`);
   const cond = where.length ? and(...where) : undefined;
 
   const total = db
