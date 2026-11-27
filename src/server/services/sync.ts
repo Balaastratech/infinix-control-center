@@ -22,7 +22,7 @@ const orderRow = z.object({
 });
 const ticketRow = z.object({ id: z.string(), order_id: z.string(), reason: z.string(), status: z.string() });
 const paymentRow = z.object({ id: z.string(), order_id: z.string(), status: z.string(), amount_minor: paise, currency: z.string() });
-const refundRow = z.object({
+export const refundRow = z.object({
   id: z.string(),
   order_id: z.string(),
   amount_minor: z.number().int().positive(),

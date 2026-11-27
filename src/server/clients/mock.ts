@@ -21,7 +21,8 @@ export function orderPath(prefix: string, id: unknown): string | null {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export async function request<T>(method: "GET" | "POST", path: string, body?: Record<string, unknown>): Promise<ApiResult<T>> {
+// retry=false for POSTs with no idempotency key (refunds): the caller checks upstream before any second attempt.
+export async function request<T>(method: "GET" | "POST", path: string, body?: Record<string, unknown>, retry = true): Promise<ApiResult<T>> {
   // An array/object order_id crashes the mock with no reply, which would look like a network error and be retried.
   if (body && "order_id" in body && !isValidId(body.order_id)) {
     return { ok: false, status: null, error: "invalid order_id" };
@@ -30,7 +31,7 @@ export async function request<T>(method: "GET" | "POST", path: string, body?: Re
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     if (attempt > 1) await sleep(BACKOFF_MS[attempt - 2]);
     last = await attemptOnce<T>(method, path, body);
-    const retryable = !last.ok && (last.status === null || last.status === 503);
+    const retryable = retry && !last.ok && (last.status === null || last.status === 503);
     if (!retryable) return last;
   }
   return last;

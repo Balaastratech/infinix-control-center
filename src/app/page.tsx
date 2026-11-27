@@ -15,7 +15,7 @@ export default async function Home() {
         Signed in as {user.email} ({user.role}) <LogoutButton />
       </p>
       <p>
-        <Link href="/orders">Orders</Link>
+        <Link href="/orders">Orders</Link> · <Link href="/approvals">Approvals</Link> · <Link href="/audit">Audit log</Link>
       </p>
     </main>
   );
