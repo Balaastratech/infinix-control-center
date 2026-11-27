@@ -11,6 +11,7 @@ export default defineConfig({
       // Test-only values, not real secrets.
       SESSION_SECRET: "test-session-secret-0123456789abcdef0123456789",
       WEBHOOK_SECRET: "test-webhook-secret-0123456789abcdef0123456789",
+      MOCK_BASE_URL: "http://mock.test", // tests use MSW; never the real mock
     },
   },
 });

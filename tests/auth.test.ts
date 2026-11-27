@@ -1,12 +1,15 @@
 import { eq, sql } from "drizzle-orm";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { POST as login } from "@/app/api/auth/login/route";
 import { POST as logout } from "@/app/api/auth/logout/route";
 import { GET as me } from "@/app/api/me/route";
 import { POST as syncNow } from "@/app/api/sync/route";
 import type { Db } from "@/server/db";
-import { users } from "@/server/db/schema";
+import { auditLog, users } from "@/server/db/schema";
 import { PASSWORD, setupTestDb } from "./helpers/db";
+
+// These tests are about the role check, not sync: stub the sync itself (tested in sync.test.ts).
+vi.mock("@/server/services/sync", () => ({ syncAll: vi.fn(async () => ({ services: [], pendingApplied: 0 })) }));
 
 let db: Db;
 beforeAll(() => {
@@ -57,7 +60,7 @@ describe("requireRole on a real write route (POST /api/sync, Operator+)", () => 
       const res = await sync(await loginAs(email));
       expect(res.status).not.toBe(401);
       expect(res.status).not.toBe(403);
-      expect(res.status).toBe(501); // the route's own body: sync lands in slice 2
+      expect(res.status).toBe(200); // the route's own body
     }
   });
 
@@ -68,11 +71,12 @@ describe("requireRole on a real write route (POST /api/sync, Operator+)", () => 
       .returning()
       .all();
     const cookie = await loginAs("temp@nova.test");
-    expect((await sync(cookie)).status).toBe(501);
+    expect((await sync(cookie)).status).toBe(200);
 
     db.update(users).set({ role: "viewer" }).where(eq(users.id, temp.id)).run();
     expect((await sync(cookie)).status).toBe(403); // same cookie, demoted
 
+    db.delete(auditLog).where(eq(auditLog.userId, temp.id)).run(); // its sync audit rows reference the user
     db.delete(users).where(eq(users.id, temp.id)).run();
     expect((await sync(cookie)).status).toBe(401); // same cookie, user gone
   });

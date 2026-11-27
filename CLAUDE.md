@@ -64,6 +64,7 @@ Money is integer paise everywhere (₹5,000 = 500000). Never use floats for mone
 - Must run on a fresh clone with no accounts: setup creates .env.local (random SESSION_SECRET) if missing.
 - Ask me before adding a dependency. Don't change a test to make it pass without telling me why.
 - Stay inside this folder. Never edit files in ./attachments.
+- Don't use busctl or the Agent Bus here.
 
 ## Agreed decisions
 External API contract and mock quirks: docs/external-apis.md (mock_services.py is the truth).
