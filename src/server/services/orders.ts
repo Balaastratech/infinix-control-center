@@ -7,7 +7,7 @@ import { getDb } from "@/server/db";
 import { customers, operations, orders, payments, refunds, shipments, tickets, webhookEvents } from "@/server/db/schema";
 import { formatIst } from "@/lib/format";
 import { audit, type Actor } from "./audit";
-import { recordResult } from "./health";
+import { recordNetworkFailure } from "./health";
 import { refundPosition } from "./refunds";
 import { shipmentRow, upsertShipment } from "./sync";
 import { onWebhookEvent } from "./workflows";
@@ -103,7 +103,7 @@ async function refreshShipment(orderId: string): Promise<string | null> {
   const path = orderPath("/shipping/shipments/", orderId);
   if (!path) return "Shipping lookup failed: invalid order id";
   const res = await request<unknown>("GET", path);
-  recordResult("shipping", res);
+  recordNetworkFailure("shipping", res); // a 503 for this order is this order's error, not Shipping down
   const parsed = res.ok ? shipmentRow.safeParse(res.data) : null;
   if (parsed?.success && parsed.data.order_id === orderId) {
     getDb().transaction(() => upsertShipment(parsed.data, new Date().toISOString()));
@@ -139,34 +139,55 @@ export async function getOrderDetail(orderId: string) {
   };
 }
 
-// ---------- cancel ----------
+// ---------- cancel and reconcile ----------
+// cancel: our rule first, then the Commerce API; success fires order.cancelled workflows.
+// reconcile: the order is already cancelled locally (webhook) but upstream still says processing. Push the cancel so
+// upstream agrees (the mock's refund eligibility reads its own order status). No workflows: the webhook already fired them.
 
 export type CancelResult =
   | { ok: true; operationId: number; status: string }
   | { ok: false; code: "not_found" | "refused" | "upstream"; reason: string; operationId?: number; httpStatus?: number | null };
 
-// Why our rule refuses a cancel, or null. Checked before any API call.
-function cancelRefusal(orderId: string): string | null {
-  const db = getDb();
-  const order = db.select().from(orders).where(eq(orders.id, orderId)).get()!;
-  if (order.status === "cancelled") return "order is already cancelled";
-  if (NOT_CANCELLABLE_ORDER.includes(order.status)) return `order is ${order.status}`;
-  const shipment = db.select().from(shipments).where(eq(shipments.orderId, orderId)).get();
-  if (shipment && NOT_CANCELLABLE_SHIPMENT.includes(shipment.status)) return `shipment is ${shipment.status}`;
-  return null;
+type CancelKind = "cancel" | "reconcile";
+const AUDIT_ACTION: Record<CancelKind, string> = { cancel: "order.cancel", reconcile: "order.reconcile_cancel" };
+
+type OrderRow = typeof orders.$inferSelect;
+
+function shipmentRefusal(orderId: string): string | null {
+  const shipment = getDb().select().from(shipments).where(eq(shipments.orderId, orderId)).get();
+  return shipment && NOT_CANCELLABLE_SHIPMENT.includes(shipment.status) ? `shipment is ${shipment.status}` : null;
 }
+
+// Why each kind is refused, or null. Checked before any API call.
+const REFUSAL: Record<CancelKind, (order: OrderRow) => string | null> = {
+  cancel: (order) => {
+    if (order.status === "cancelled") {
+      return order.upstreamStatus === "cancelled"
+        ? "order is already cancelled"
+        : "order is already cancelled locally; use Push cancel upstream";
+    }
+    if (NOT_CANCELLABLE_ORDER.includes(order.status)) return `order is ${order.status}`;
+    return shipmentRefusal(order.id);
+  },
+  reconcile: (order) => {
+    if (order.status !== "cancelled") return `order is ${order.status} locally, not cancelled`;
+    if (order.upstreamStatus !== "processing") return `upstream order is ${order.upstreamStatus}, not processing`;
+    return shipmentRefusal(order.id);
+  },
+};
 
 const cancelReply = z.object({ id: z.string(), status: z.string() });
 
-export async function cancelOrder(orderId: string, actor: Actor): Promise<CancelResult> {
+// Shared path: refuse or record the operation (requested -> submitted -> succeeded | failed), call the API, audit.
+// `onSuccess` runs in the same transaction that marks the operation succeeded.
+async function submitCancel(kind: CancelKind, orderId: string, actor: Actor, onSuccess: (opId: number, at: string) => void): Promise<CancelResult> {
   const db = getDb();
   const log = (outcome: string, detail: unknown) =>
-    audit({ userId: actor.userId, actorLabel: actor.label, role: actor.role, action: "order.cancel", target: orderId, outcome, detail });
+    audit({ userId: actor.userId, actorLabel: actor.label, role: actor.role, action: AUDIT_ACTION[kind], target: orderId, outcome, detail });
 
-  if (!db.select({ id: orders.id }).from(orders).where(eq(orders.id, orderId)).get()) {
-    return { ok: false, code: "not_found", reason: "unknown order" };
-  }
-  const reason = cancelRefusal(orderId);
+  const order = db.select().from(orders).where(eq(orders.id, orderId)).get();
+  if (!order) return { ok: false, code: "not_found", reason: "unknown order" };
+  const reason = REFUSAL[kind](order);
   if (reason) {
     log("refused", { reason });
     return { ok: false, code: "refused", reason };
@@ -174,7 +195,7 @@ export async function cancelOrder(orderId: string, actor: Actor): Promise<Cancel
 
   const [op] = db
     .insert(operations)
-    .values({ type: "cancel", orderId, status: "requested", requestedByUserId: actor.userId, requestedByLabel: actor.label })
+    .values({ type: kind, orderId, status: "requested", requestedByUserId: actor.userId, requestedByLabel: actor.label })
     .returning({ id: operations.id })
     .all();
   const setOp = (set: Partial<typeof operations.$inferInsert>) =>
@@ -182,7 +203,7 @@ export async function cancelOrder(orderId: string, actor: Actor): Promise<Cancel
   setOp({ status: "submitted" });
 
   const res = await request<unknown>("POST", orderPath("/commerce/orders/", orderId) + "/cancel", {});
-  recordResult("commerce", res);
+  recordNetworkFailure("commerce", res);
   const reply = res.ok ? cancelReply.safeParse(res.data) : null;
   // Final state comes from the answer: only a reply that says "cancelled" for this order is a success.
   if (!reply?.success || reply.data.id !== orderId || reply.data.status !== "cancelled") {
@@ -193,8 +214,19 @@ export async function cancelOrder(orderId: string, actor: Actor): Promise<Cancel
   }
 
   const at = new Date().toISOString();
-  const eventId = `app-cancel-${op.id}`;
   db.transaction(() => {
+    onSuccess(op.id, at);
+    setOp({ status: "succeeded" });
+  });
+  log("succeeded", { operationId: op.id });
+  return { ok: true, operationId: op.id, status: "cancelled" };
+}
+
+export async function cancelOrder(orderId: string, actor: Actor): Promise<CancelResult> {
+  const db = getDb();
+  const eventIdFor = (opId: number) => `app-cancel-${opId}`;
+  const result = await submitCancel("cancel", orderId, actor, (opId, at) => {
+    const eventId = eventIdFor(opId);
     db.update(orders)
       .set({ status: "cancelled", upstreamStatus: "cancelled", localEventAt: at, localUpdatedAt: at })
       .where(eq(orders.id, orderId))
@@ -211,10 +243,19 @@ export async function cancelOrder(orderId: string, actor: Actor): Promise<Cancel
         note: `cancelled in app by ${actor.label}`,
       })
       .run();
-    setOp({ status: "succeeded" });
   });
-  log("succeeded", { operationId: op.id });
   // Our own successful cancel fires order.cancelled workflows (agreed decision), once per cancel.
-  await onWebhookEvent({ eventId, type: "order.cancelled", orderId, occurredAt: at, data: { status: "cancelled" } });
-  return { ok: true, operationId: op.id, status: "cancelled" };
+  if (result.ok) {
+    const event = db.select().from(webhookEvents).where(eq(webhookEvents.eventId, eventIdFor(result.operationId))).get()!;
+    await onWebhookEvent({ eventId: event.eventId, type: "order.cancelled", orderId, occurredAt: event.occurredAt, data: { status: "cancelled" } });
+  }
+  return result;
+}
+
+// Upstream now agrees, so the order stops being "local ahead". Status and local_event_at stay as the webhook set them.
+export function reconcileCancel(orderId: string, actor: Actor): Promise<CancelResult> {
+  const db = getDb();
+  return submitCancel("reconcile", orderId, actor, (_opId, at) => {
+    db.update(orders).set({ upstreamStatus: "cancelled", localUpdatedAt: at }).where(eq(orders.id, orderId)).run();
+  });
 }

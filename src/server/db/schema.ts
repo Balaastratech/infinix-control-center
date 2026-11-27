@@ -10,9 +10,10 @@ const now = sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`;
 export const ROLES = ["viewer", "operator", "manager"] as const;
 export type Role = (typeof ROLES)[number];
 
-export const OPERATION_TYPES = ["cancel", "refund"] as const;
+export const OPERATION_TYPES = ["cancel", "refund", "reconcile"] as const;
 // refund: requested -> pending_approval -> approved -> submitted -> succeeded | failed  (or -> rejected)
 // cancel: requested -> submitted -> succeeded | failed  (no approval step; enforced by a CHECK below)
+// reconcile: same path as cancel. Pushes a cancel we already have locally (webhook) to the Commerce API.
 export const OPERATION_STATUSES = [
   "requested",
   "pending_approval",
@@ -161,11 +162,11 @@ export const operations = sqliteTable(
     check("operations_status_check", inList("status", OPERATION_STATUSES)),
     check(
       "operations_amount_check",
-      sql`(${t.type} = 'cancel' AND ${t.amountMinor} IS NULL) OR (${t.type} = 'refund' AND ${t.amountMinor} > 0)`,
+      sql`(${t.type} IN ('cancel', 'reconcile') AND ${t.amountMinor} IS NULL) OR (${t.type} = 'refund' AND ${t.amountMinor} > 0)`,
     ),
     check(
       "operations_cancel_path_check",
-      sql`NOT (${t.type} = 'cancel' AND ${t.status} IN ('pending_approval', 'approved', 'rejected'))`,
+      sql`NOT (${t.type} <> 'refund' AND ${t.status} IN ('pending_approval', 'approved', 'rejected'))`,
     ),
   ],
 );

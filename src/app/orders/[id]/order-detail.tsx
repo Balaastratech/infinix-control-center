@@ -69,6 +69,11 @@ export function OrderDetail({ id, canOperate }: { id: string; canOperate: boolea
     void act("cancel", {}, () => "Order cancelled.");
   }
 
+  function pushCancel() {
+    if (!confirm(`Send the cancel for ${id} to the Commerce API so it agrees with us?`)) return;
+    void act("reconcile-cancel", {}, () => "Commerce API now shows the order cancelled.");
+  }
+
   function requestRefund(e: React.FormEvent) {
     e.preventDefault();
     const paise = parseRupees(amount);
@@ -121,6 +126,15 @@ export function OrderDetail({ id, canOperate }: { id: string; canOperate: boolea
             <button onClick={cancel} disabled={busy}>
               Cancel order
             </button>
+            {order.status === "cancelled" && order.upstreamStatus === "processing" && (
+              <>
+                {" "}
+                <button onClick={pushCancel} disabled={busy}>
+                  Push cancel upstream
+                </button>{" "}
+                <small>Cancelled here by a webhook; the Commerce API still says processing.</small>
+              </>
+            )}
           </p>
           <form onSubmit={requestRefund}>
             <label>

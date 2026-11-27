@@ -7,7 +7,7 @@ export type Service = (typeof SERVICES)[number];
 
 const now = () => new Date().toISOString();
 
-// A failure recorded here has already been retried (3 attempts), so one failure marks the service down.
+// Called by sync (list calls) and on network failures. A failure here has already been retried 3 times, so one marks the service down.
 export function recordHealth(service: Service, ok: boolean, error?: string): void {
   const at = now();
   const db = getDb();
@@ -32,10 +32,10 @@ export function recordHealth(service: Service, ok: boolean, error?: string): voi
   }
 }
 
-// Health from one live call. A business answer (400/404/409) means the service is up; network errors and 5xx mean down.
-export function recordResult(service: Service, res: ApiResult<unknown>): void {
-  const up = res.ok || (res.status !== null && res.status < 500);
-  recordHealth(service, up, res.ok ? undefined : res.error);
+// Health from a single-record call (detail lookup, cancel). Its HTTP answer, even a 503, belongs to that record and is
+// shown there; only a network failure says the service itself is unreachable. Success never clears "down": sync does.
+export function recordNetworkFailure(service: Service, res: ApiResult<unknown>): void {
+  if (!res.ok && res.status === null) recordHealth(service, false, res.error);
 }
 
 export interface ServiceStatus {

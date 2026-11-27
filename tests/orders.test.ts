@@ -4,6 +4,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { GET as listRoute } from "@/app/api/orders/route";
 import { GET as detailRoute } from "@/app/api/orders/[id]/route";
 import { POST as cancelRoute } from "@/app/api/orders/[id]/cancel/route";
+import { POST as reconcileRoute } from "@/app/api/orders/[id]/reconcile-cancel/route";
+import { GET as healthRoute } from "@/app/api/health/route";
 import { POST as refundRoute } from "@/app/api/orders/[id]/refund-requests/route";
 import { POST as bulkRoute } from "@/app/api/refund-requests/bulk/route";
 import { createSessionCookie } from "@/server/auth/session";
@@ -52,12 +54,18 @@ async function call(
   return { status: res.status, body: await res.json() };
 }
 const cancel = (id: string, as?: string) => call(cancelRoute, `/api/orders/${id}/cancel`, { id, as });
+const pushCancel = (id: string, as?: string) => call(reconcileRoute, `/api/orders/${id}/reconcile-cancel`, { id, as });
 const refund = (id: string, body: unknown = {}, as?: string) =>
   call(refundRoute, `/api/orders/${id}/refund-requests`, { id, body, as });
 const bulk = (as?: string) => call((req) => bulkRoute(req), "/api/refund-requests/bulk", { as });
 const detail = (id: string) => call(detailRoute, `/api/orders/${id}`, { id, method: "GET" });
 const list = (qs: string) => call((req) => listRoute(req), `/api/orders${qs}`, { method: "GET" });
 
+const shippingHealth = async () =>
+  ((await (await healthRoute()).json()).services as { service: string; status: string }[]).find((x) => x.service === "shipping");
+// evt-003: NC-1004 cancelled by webhook; upstream still says processing.
+const cancelLocallyByWebhook = (id: string) =>
+  db.update(orders).set({ status: "cancelled", localEventAt: "2026-11-22T10:10:00Z" }).where(eq(orders.id, id)).run();
 const order = (id: string) => db.select().from(orders).where(eq(orders.id, id)).get()!;
 const opsFor = (id: string) => db.select().from(operations).where(eq(operations.orderId, id)).all();
 
@@ -135,6 +143,57 @@ describe("POST /api/orders/[id]/cancel", () => {
     expect(op.error).toMatch(/network error/);
     expect(order("NC-1004")).toMatchObject({ status: "processing", upstreamStatus: "processing", localEventAt: null });
     expect(hook).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/orders/[id]/reconcile-cancel (Push cancel upstream)", () => {
+  it("NC-1004 after evt-003: a repeat cancel is refused, the push makes upstream agree without firing workflows", async () => {
+    cancelLocallyByWebhook("NC-1004");
+    const calls = mockCancel(cancelledOrder);
+    expect((await list("?localAhead=true")).body.total).toBe(1);
+
+    const repeat = await cancel("NC-1004");
+    expect(repeat).toMatchObject({ status: 409, body: { error: "order is already cancelled locally; use Push cancel upstream" } });
+    expect(calls).toHaveLength(0);
+
+    const res = await pushCancel("NC-1004");
+    expect(res.status).toBe(200);
+    expect(calls).toEqual(["NC-1004"]);
+    expect(order("NC-1004")).toMatchObject({ status: "cancelled", upstreamStatus: "cancelled", localEventAt: "2026-11-22T10:10:00Z" });
+    expect(opsFor("NC-1004")).toEqual([expect.objectContaining({ type: "reconcile", status: "succeeded", requestedByLabel: OPERATOR })]);
+    expect(db.select().from(webhookEvents).all()).toHaveLength(0); // no app event
+    expect(hook).not.toHaveBeenCalled();
+    const log = db.select().from(auditLog).where(eq(auditLog.action, "order.reconcile_cancel")).all();
+    expect(log).toEqual([expect.objectContaining({ actorLabel: OPERATOR, role: "operator", target: "NC-1004", outcome: "succeeded" })]);
+    expect((await list("?localAhead=true")).body.total).toBe(0);
+
+    // Done: a second push is refused locally.
+    expect((await pushCancel("NC-1004")).body.error).toBe("upstream order is cancelled, not processing");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("is refused for an order not cancelled locally (NC-1005), with no API call", async () => {
+    const calls = mockCancel(cancelledOrder);
+    const res = await pushCancel("NC-1005");
+    expect(res).toMatchObject({ status: 409, body: { error: "order is processing locally, not cancelled" } });
+    expect(calls).toHaveLength(0);
+    expect(opsFor("NC-1005")).toHaveLength(0);
+  });
+
+  it("a mock 409 is saved as a failed reconcile; the order stays local ahead", async () => {
+    cancelLocallyByWebhook("NC-1004");
+    mockCancel(() => HttpResponse.json({ error: "already shipped" }, { status: 409 }));
+    const res = await pushCancel("NC-1004");
+    expect(res.status).toBe(502);
+    expect(opsFor("NC-1004")).toEqual([expect.objectContaining({ type: "reconcile", status: "failed", error: "already shipped" })]);
+    expect(order("NC-1004")).toMatchObject({ status: "cancelled", upstreamStatus: "processing" });
+  });
+
+  it("a Viewer gets 403", async () => {
+    cancelLocallyByWebhook("NC-1004");
+    const calls = mockCancel(cancelledOrder);
+    expect((await pushCancel("NC-1004", VIEWER)).status).toBe(403);
+    expect(calls).toHaveLength(0);
   });
 });
 
@@ -221,6 +280,21 @@ describe("GET /api/orders/[id]", () => {
     expect(res.body.refundPosition).toMatchObject({ capturedMinor: res.body.payment.amountMinor, refundedMinor: 0 });
   });
 
+  it("opening NC-1012 (lookup 503) leaves Shipping ok: that error belongs to the order", async () => {
+    server.use(
+      http.get(`${BASE}/shipping/shipments/:id`, () => HttpResponse.json({ error: "carrier temporarily unavailable" }, { status: 503 })),
+    );
+    expect(await shippingHealth()).toMatchObject({ status: "ok" });
+    expect((await detail("NC-1012")).body.shippingError).toMatch(/carrier temporarily unavailable/);
+    expect(await shippingHealth()).toMatchObject({ status: "ok" });
+  });
+
+  it("a network failure on the lookup does mark Shipping down", async () => {
+    server.use(http.get(`${BASE}/shipping/shipments/:id`, () => HttpResponse.error()));
+    expect((await detail("NC-1004")).body.shippingError).toMatch(/^Shipping lookup failed: network error/);
+    expect(await shippingHealth()).toMatchObject({ status: "down" });
+  });
+
   it("refreshes the shipment from a successful live lookup", async () => {
     server.use(
       http.get(`${BASE}/shipping/shipments/:id`, () =>
@@ -252,7 +326,7 @@ describe("GET /api/orders", () => {
   });
 
   it("filters local-ahead orders", async () => {
-    db.update(orders).set({ status: "cancelled", localEventAt: "2026-11-22T10:10:00Z" }).where(eq(orders.id, "NC-1004")).run();
+    cancelLocallyByWebhook("NC-1004");
     const res = await list("?localAhead=true");
     expect(res.body.total).toBe(1);
     expect(res.body.items[0]).toMatchObject({ id: "NC-1004", status: "cancelled", upstreamStatus: "processing", localAhead: true });
