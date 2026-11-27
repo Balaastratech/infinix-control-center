@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 
 export const PREVIEW_ROWS = 5;
 
-export function AnswerDetails({ count, children }: { count: number; children: ReactNode }) {
+export function AnswerDetails({ count, children }: { count: number; children?: ReactNode }) {
   if (count === 0) return null;
   return (
     <details className="answer-details">

@@ -145,9 +145,9 @@ describe("new read tools on the sample data", () => {
 
 describe("answer details", () => {
   it("are collapsed by default and show the count", () => {
-    const html = renderToStaticMarkup(createElement(AnswerDetails, { count: 2, children: "table" }));
+    const html = renderToStaticMarkup(createElement(AnswerDetails, { count: 2 }, "table"));
     expect(html).toMatch(/^<details class="answer-details"><summary>Details \(2\)<\/summary>/);
     expect(html).not.toMatch(/<details[^>]*\sopen/);
-    expect(renderToStaticMarkup(createElement(AnswerDetails, { count: 0, children: "x" }))).toBe("");
+    expect(renderToStaticMarkup(createElement(AnswerDetails, { count: 0 }, "x"))).toBe("");
   });
 });
