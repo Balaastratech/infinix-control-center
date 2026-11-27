@@ -107,6 +107,9 @@ export const shipments = sqliteTable("shipments", {
   upstreamStatus: text("upstream_status"),
   upstreamUpdatedAt: text("upstream_updated_at"),
   syncedAt: text("synced_at"),
+  // Last failed single-shipment lookup (e.g. NC-1012's permanent 503); cleared by the next successful lookup.
+  lookupError: text("lookup_error"),
+  lookupErrorAt: text("lookup_error_at"),
 });
 
 // Upstream refunds (R-…). Payment rows never change upstream, so "refunded so far" is summed from here.

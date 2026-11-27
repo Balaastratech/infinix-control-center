@@ -104,11 +104,19 @@ async function refreshShipment(orderId: string): Promise<string | null> {
   recordNetworkFailure("shipping", res); // a 503 for this order is this order's error, not Shipping down
   const parsed = res.ok ? shipmentRow.safeParse(res.data) : null;
   if (parsed?.success && parsed.data.order_id === orderId) {
-    getDb().transaction(() => upsertShipment(parsed.data, new Date().toISOString()));
+    getDb().transaction(() => {
+      upsertShipment(parsed.data, new Date().toISOString());
+      getDb().update(shipments).set({ lookupError: null, lookupErrorAt: null }).where(eq(shipments.orderId, orderId)).run();
+    });
     return null;
   }
   const stored = getDb().select().from(shipments).where(eq(shipments.orderId, orderId)).get();
   const error = res.ok ? "unexpected reply shape" : res.error;
+  getDb()
+    .update(shipments)
+    .set({ lookupError: error, lookupErrorAt: new Date().toISOString() })
+    .where(eq(shipments.orderId, orderId))
+    .run();
   return `Shipping lookup failed: ${error}, showing data from ${formatIst(stored?.syncedAt ?? stored?.updatedAt)}`;
 }
 
