@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { formatIst, formatMoney } from "@/lib/format";
-import { Alert, Badge, Empty, FilterSelect, Skeleton, TableWrap } from "../ui";
+import { Alert, Badge, Empty, FilterSelect, Skeleton, TableWrap, CustomerLink } from "../ui";
 
 interface OrderRow {
   id: string;
@@ -12,6 +12,7 @@ interface OrderRow {
   upstreamStatus: string | null;
   amountMinor: number;
   createdAt: string;
+  customerId: string;
   customerName: string | null;
   customerEmail: string | null;
   paymentStatus: string | null;
@@ -125,7 +126,7 @@ export function OrdersList() {
                     </Link>
                   </td>
                   <td>
-                    {o.customerName}
+                    <CustomerLink id={o.customerId} name={o.customerName} />
                     <small>{o.customerEmail}</small>
                   </td>
                   <td className="num">{formatMoney(o.amountMinor)}</td>

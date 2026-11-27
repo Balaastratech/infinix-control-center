@@ -5,7 +5,10 @@ import { usePathname } from "next/navigation";
 
 const ITEMS = [
   { href: "/", label: "Dashboard" },
+  { href: "/queues", label: "Work queues" },
   { href: "/orders", label: "Orders" },
+  { href: "/customers", label: "Customers" },
+  { href: "/tickets", label: "Tickets" },
   { href: "/approvals", label: "Approvals" },
   { href: "/assistant", label: "Assistant" },
   { href: "/workflows", label: "Workflows" },

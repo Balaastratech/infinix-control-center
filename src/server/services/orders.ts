@@ -25,6 +25,7 @@ export interface OrderListQuery {
   paymentStatus?: string;
   shipmentStatus?: string;
   localAhead?: boolean;
+  customerId?: string;
   page: number;
   pageSize: number;
 }
@@ -53,6 +54,7 @@ export function listOrders(query: OrderListQuery) {
   if (query.paymentStatus) where.push(eq(payments.status, query.paymentStatus));
   if (query.shipmentStatus) where.push(eq(shipments.status, query.shipmentStatus));
   if (query.localAhead) where.push(localAhead);
+  if (query.customerId) where.push(eq(orders.customerId, query.customerId));
   const cond = where.length ? and(...where) : undefined;
 
   const total = db
@@ -70,6 +72,7 @@ export function listOrders(query: OrderListQuery) {
       upstreamStatus: orders.upstreamStatus,
       amountMinor: orders.amountMinor,
       createdAt: orders.createdAt,
+      customerId: orders.customerId,
       customerName: customers.name,
       customerEmail: customers.email,
       paymentStatus: payments.status,
@@ -277,6 +280,7 @@ export interface AllowedActions {
   cancel: ActionState;
   reconcile: ActionState;
   refund: ActionState;
+  createTicket: ActionState;
 }
 
 export function allowedActions(order: OrderRow): AllowedActions {
@@ -285,5 +289,6 @@ export function allowedActions(order: OrderRow): AllowedActions {
     cancel: state(REFUSAL.cancel(order)),
     reconcile: state(REFUSAL.reconcile(order)),
     refund: state(refundRefusal(order.id, undefined)),
+    createTicket: state(null), // any known order; the reason is required on submit
   };
 }

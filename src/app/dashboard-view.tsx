@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { formatIst, formatMoney } from "@/lib/format";
 import { auditActionLabel, auditTargetLabel } from "@/lib/labels";
+import { unpaidReason } from "@/lib/ticket-template";
+import { CreateTicketButton } from "./create-ticket-button";
 import type { Dashboard } from "@/server/services/dashboard";
 import { Alert, Badge, Card, Empty, Skeleton, SkeletonCard, TableWrap } from "./ui";
 
@@ -120,15 +122,26 @@ export function DashboardView({ canOperate }: { canOperate: boolean }) {
               {unpaidShipped.count} shipped or delivered order{unpaidShipped.count === 1 ? "" : "s"} with a failed payment
             </span>
             {unpaidShipped.count > 0 && (
-              <div className="chips">
+              <ul className="unpaid-list">
                 {unpaidShipped.orders.map((o) => (
-                  <Link key={o.orderId} href={`/orders/${o.orderId}`} className="chip">
-                    {o.orderId} <span className="chip-amt">{formatMoney(o.amountMinor)}</span>
-                  </Link>
+                  <li key={o.orderId}>
+                    <Link href={`/orders/${o.orderId}`} className="chip">
+                      {o.orderId} <span className="chip-amt">{formatMoney(o.amountMinor)}</span>
+                    </Link>
+                    {o.openTicketId ? (
+                      <Link href={`/tickets?orderId=${o.orderId}`} className="small">
+                        Ticket {o.openTicketId} open
+                      </Link>
+                    ) : canOperate ? (
+                      <CreateTicketButton orderId={o.orderId} defaultReason={unpaidReason(o.orderId, o.amountMinor)} label="Open support ticket" onDone={() => setVersion((v) => v + 1)} />
+                    ) : (
+                      <span className="muted small">No ticket yet</span>
+                    )}
+                  </li>
                 ))}
-              </div>
+              </ul>
             )}
-            <span className="muted small">Fix: open a support ticket. They stay here until the Payment API shows them paid.</span>
+            <span className="muted small">Fix: a support ticket per order. They stay here until the Payment API shows them paid.</span>
           </div>
         </div>
       </section>

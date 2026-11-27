@@ -1125,3 +1125,71 @@ button[aria-busy="true"]::before {
     flex: 1 1 100%;
   }
 }
+
+/* ---------- tickets, queues ---------- */
+.ticket-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-width: 260px;
+}
+.ticket-form textarea {
+  height: auto;
+  padding: var(--s2) var(--s3);
+  resize: vertical;
+}
+.ok-text {
+  color: var(--ok);
+}
+.tabs {
+  display: flex;
+  gap: var(--s1);
+  padding: 0 var(--s4);
+  border-bottom: 1px solid var(--line);
+}
+.tabs a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s3) var(--s3);
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  color: var(--text-2);
+  font-weight: 550;
+}
+.tabs a:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+.tabs a[aria-current="page"] {
+  color: var(--accent-text);
+  border-bottom-color: var(--accent);
+}
+.tabs .count {
+  padding: 0 var(--s2);
+  border-radius: var(--radius-pill);
+  background: var(--muted-soft);
+  color: var(--text-2);
+  font-size: var(--text-xs);
+}
+.tabs a[aria-current="page"] .count {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.next-action {
+  font-weight: 550;
+}
+.unpaid-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.unpaid-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s3);
+}

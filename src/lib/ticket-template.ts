@@ -20,3 +20,7 @@ export function renderReason(template: string, facts: TicketFacts, event: { orde
   };
   return template.replace(/\{(\w+)\}/g, (m, key: string) => values[key] ?? m);
 }
+
+// Suggested reason for a shipped/delivered order whose payment failed (dashboard and Finance queue).
+export const unpaidReason = (orderId: string, amountMinor: number | null) =>
+  `Payment failed for ${orderId} (${formatMoney(amountMinor)}) after it shipped; collect payment.`;

@@ -1,4 +1,5 @@
 // Small presentational pieces shared by server and client components. Styling lives in globals.css.
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { statusLabel } from "@/lib/labels";
 
@@ -118,4 +119,10 @@ export function FilterSelect({ label, value, options, onChange, format = statusL
       </select>
     </label>
   );
+}
+
+// Customer name linking to their page; falls back to plain text when the customer isn't known locally.
+export function CustomerLink({ id, name }: { id: string | null | undefined; name: string | null | undefined }) {
+  if (!id) return <span className="muted">{name ?? "-"}</span>;
+  return <Link href={`/customers/${encodeURIComponent(id)}`}>{name ?? id}</Link>;
 }

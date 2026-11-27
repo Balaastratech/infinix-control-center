@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { formatIst, formatMoney, parseRupees } from "@/lib/format";
-import { Alert, Badge, Card, Empty, Skeleton, SkeletonCard, TableWrap } from "../../ui";
+import { CreateTicketButton } from "../../create-ticket-button";
+import { Alert, Badge, Card, CustomerLink, Empty, Skeleton, SkeletonCard, TableWrap } from "../../ui";
 
 type Row = Record<string, string | number | boolean | null>;
 interface Detail {
@@ -16,7 +17,7 @@ interface Detail {
   operations: Row[];
   tickets: Row[];
   events: Row[];
-  actions: Record<"cancel" | "reconcile" | "refund", { allowed: boolean; reason: string | null }>;
+  actions: Record<"cancel" | "reconcile" | "refund" | "createTicket", { allowed: boolean; reason: string | null }>;
 }
 type Busy = "cancel" | "push" | "refund" | null;
 
@@ -121,7 +122,7 @@ export function OrderDetail({ id, canOperate }: { id: string; canOperate: boolea
             <dd>
               {customer ? (
                 <>
-                  {customer.name}
+                  <CustomerLink id={customer.id as string} name={customer.name as string} />
                   <br />
                   <span className="muted">{customer.email}</span>
                 </>
@@ -204,9 +205,20 @@ export function OrderDetail({ id, canOperate }: { id: string; canOperate: boolea
             }}
             onSubmit={requestRefund}
           />
+          <div className="action">
+            <div className="action-text">
+              <h3>Create support ticket</h3>
+              <p>Opens a ticket in the Commerce API for the support team. A reason is required.</p>
+            </div>
+            {data.actions.createTicket.allowed ? (
+              <CreateTicketButton orderId={id} label="Create support ticket" onDone={() => setVersion((v) => v + 1)} />
+            ) : (
+              <span className="blocked">Can&apos;t create a ticket: {data.actions.createTicket.reason}.</span>
+            )}
+          </div>
         </Actions>
       ) : (
-        <Alert tone="warn">Read only: your role (viewer) can see this order but cannot cancel it or request refunds.</Alert>
+        <Alert tone="warn">Read only: your role (viewer) can see this order but cannot cancel it, request refunds or create tickets.</Alert>
       )}
 
       <DataTable

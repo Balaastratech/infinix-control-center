@@ -3,7 +3,6 @@
 // after the event's DB transaction has committed. Never from sync. Rules: CLAUDE.md, PLAN.md block 5.
 import { desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { BACKOFF_MS, isValidId, request, type ApiResult } from "@/server/clients/mock";
 import { getDb } from "@/server/db";
 import {
   ORDER_STATUSES,
@@ -12,7 +11,6 @@ import {
   payments,
   SHIPMENT_STATUSES,
   shipments,
-  tickets,
   workflowExecutions,
   workflows,
   WORKFLOW_TRIGGERS,
@@ -20,8 +18,8 @@ import {
 import seed from "@/server/db/seed-workflows.json";
 import { renderReason } from "@/lib/ticket-template";
 import { audit, type Actor } from "./audit";
-import { recordHealth, recordNetworkFailure } from "./health";
 import { requestRefund } from "./refunds";
+import { submitTicket } from "./tickets";
 
 export interface WorkflowEvent {
   eventId: string;
@@ -280,57 +278,10 @@ function refundAction(amountMinor: number | undefined, orderId: string, actor: A
 
 // ---------- action: create_ticket ----------
 
-const ticketReply = z.object({ id: z.string(), order_id: z.string(), reason: z.string(), status: z.string() });
-type UpstreamTicket = z.infer<typeof ticketReply>;
-const MAX_ATTEMPTS = 3;
-const unreachable = (res: ApiResult<unknown>) => !res.ok && (res.status === null || res.status === 503);
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 export { renderReason }; // lives in src/lib/ticket-template.ts so the editor preview uses the same code
 
-// POST /commerce/tickets has no idempotency key: before any retry, look for the ticket a lost reply may have created.
+// Same safe path as a ticket created by a person (check upstream before any retry).
 async function createTicket(template: string, facts: Facts, event: WorkflowEvent, executionId: number, actor: Actor): Promise<ActionOutcome> {
-  if (!isValidId(event.orderId)) return { ok: false, error: "invalid order id" };
-  const reason = renderReason(template, facts, event);
-  let lastError = "";
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    if (attempt > 1) {
-      await sleep(BACKOFF_MS[attempt - 2]);
-      const existing = await findLostTicket(event.orderId, reason);
-      if (existing === "unavailable") return { ok: false, error: `${lastError}; could not verify whether the ticket exists (Commerce API unreachable)` };
-      if (existing) return saveTicket(existing, executionId, actor, "adopted after a lost reply");
-    }
-    const res = await request<unknown>("POST", "/commerce/tickets", { order_id: event.orderId, reason }, false);
-    recordNetworkFailure("commerce", res);
-    if (res.ok) {
-      const t = ticketReply.safeParse(res.data);
-      if (!t.success || t.data.order_id !== event.orderId) return { ok: false, error: `unexpected ticket reply: ${JSON.stringify(res.data).slice(0, 200)}` };
-      return saveTicket(t.data, executionId, actor, "created");
-    }
-    lastError = res.error;
-    if (!unreachable(res)) break; // 400/404 etc: final
-  }
-  audit({ actorLabel: actor.label, action: "workflow.create_ticket", target: event.orderId, outcome: "failed", detail: { executionId, error: lastError } });
-  return { ok: false, error: lastError };
-}
-
-// An upstream ticket for this order and reason that we don't already have locally = the one our lost POST created.
-async function findLostTicket(orderId: string, reason: string): Promise<UpstreamTicket | null | "unavailable"> {
-  const res = await request<unknown>("GET", "/commerce/tickets");
-  if (res.ok) recordHealth("commerce", true);
-  else recordNetworkFailure("commerce", res);
-  const list = res.ok ? z.array(ticketReply).safeParse(res.data) : null;
-  if (!list?.success) return "unavailable";
-  const known = new Set(getDb().select({ id: tickets.id }).from(tickets).where(eq(tickets.orderId, orderId)).all().map((t) => t.id));
-  return list.data.find((t) => t.order_id === orderId && t.reason === reason && !known.has(t.id)) ?? null;
-}
-
-function saveTicket(t: UpstreamTicket, executionId: number, actor: Actor, how: string): ActionOutcome {
-  getDb()
-    .insert(tickets)
-    .values({ id: t.id, orderId: t.order_id, reason: t.reason, status: t.status, workflowExecutionId: executionId, createdByLabel: actor.label })
-    .onConflictDoUpdate({ target: tickets.id, set: { workflowExecutionId: executionId, createdByLabel: actor.label, missingUpstream: false } })
-    .run();
-  audit({ actorLabel: actor.label, action: "workflow.create_ticket", target: t.order_id, outcome: "succeeded", detail: { executionId, ticketId: t.id, how } });
-  return { ok: true, result: { ticketId: t.id } };
+  const r = await submitTicket(event.orderId, renderReason(template, facts, event), actor, { auditAction: "workflow.create_ticket", workflowExecutionId: executionId });
+  return r.ok ? { ok: true, result: { ticketId: r.ticketId } } : { ok: false, error: r.reason };
 }

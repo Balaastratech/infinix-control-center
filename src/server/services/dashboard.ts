@@ -9,6 +9,7 @@ import {
   refunds,
   shipments,
   syncRuns,
+  tickets,
   webhookEvents,
   WEBHOOK_STATUSES,
   workflowExecutions,
@@ -50,7 +51,12 @@ export function owedRefunds() {
 // Shipped or delivered orders whose payment failed. Fix = support ticket; stays here until upstream shows it paid.
 export function unpaidShipped() {
   const rows = getDb()
-    .select({ orderId: orders.id, status: orders.status, amountMinor: orders.amountMinor })
+    .select({
+      orderId: orders.id,
+      status: orders.status,
+      amountMinor: orders.amountMinor,
+      openTicketId: sql<string | null>`(SELECT t.id FROM ${tickets} t WHERE t.order_id = ${orders.id} AND t.status = 'open' ORDER BY t.created_at DESC LIMIT 1)`,
+    })
     .from(orders)
     .innerJoin(payments, eq(payments.orderId, orders.id))
     .where(and(inArray(orders.status, ["shipped", "delivered"]), eq(payments.status, "failed")))
