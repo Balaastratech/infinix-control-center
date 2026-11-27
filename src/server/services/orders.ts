@@ -265,3 +265,8 @@ export function reconcileCancel(orderId: string, actor: Actor): Promise<CancelRe
     db.update(orders).set({ upstreamStatus: "cancelled", localUpdatedAt: at }).where(eq(orders.id, orderId)).run();
   });
 }
+
+// Why a cancel / push-cancel is not possible right now, or null (read-only; used by the assistant's "what next").
+export function cancelBlocker(order: OrderRow, kind: CancelKind = "cancel"): string | null {
+  return REFUSAL[kind](order);
+}

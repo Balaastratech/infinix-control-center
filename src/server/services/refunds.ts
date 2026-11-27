@@ -39,7 +39,7 @@ export type RefundRequestResult =
   | { ok: false; code: "not_found" | "refused"; reason: string };
 
 // Why a refund is not allowed right now, or null. Uses local (effective) statuses.
-function refundRefusal(orderId: string, amountMinor: number | undefined): string | null {
+export function refundRefusal(orderId: string, amountMinor: number | undefined): string | null {
   const db = getDb();
   const order = db.select().from(orders).where(eq(orders.id, orderId)).get()!;
   const payment = db.select().from(payments).where(eq(payments.orderId, orderId)).get();

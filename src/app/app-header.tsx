@@ -12,7 +12,7 @@ export function AppHeader({ user }: { user: AuthUser }) {
   return (
     <header>
       <nav>
-        <Link href="/">Dashboard</Link> · <Link href="/orders">Orders</Link> · <Link href="/approvals">Approvals</Link> ·{" "}
+        <Link href="/">Dashboard</Link> · <Link href="/orders">Orders</Link> · <Link href="/approvals">Approvals</Link> · <Link href="/assistant">Assistant</Link> ·{" "}
         <Link href="/workflows">Workflows</Link> · <Link href="/integrations">Integrations</Link> · <Link href="/audit">Audit</Link>
         <span style={{ float: "right" }}>
           {user.email} ({user.role}) <LogoutButton />

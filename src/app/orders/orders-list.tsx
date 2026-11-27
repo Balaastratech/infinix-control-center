@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { formatIst, formatMoney } from "@/lib/format";
 
@@ -32,8 +33,16 @@ const FILTERS = {
 const PAGE_SIZE = 25;
 
 export function OrdersList() {
-  const [filters, setFilters] = useState<Record<string, string>>({ q: "", orderStatus: "", paymentStatus: "", shipmentStatus: "", localAhead: "" });
-  const [page, setPage] = useState(1);
+  // The URL is the state: filters and page are read from it (unknown values ignored) and written back with replaceState,
+  // so a dashboard link, a reload or a shared link shows the same list.
+  const params = useSearchParams();
+  const filters: Record<string, string> = { q: params.get("q") ?? "", localAhead: params.get("localAhead") === "true" ? "true" : "" };
+  for (const k of Object.keys(FILTERS) as (keyof typeof FILTERS)[]) {
+    const v = params.get(k) ?? "";
+    filters[k] = (FILTERS[k] as readonly string[]).includes(v) ? v : "";
+  }
+  const pageParam = Number(params.get("page"));
+  const page = Number.isInteger(pageParam) && pageParam >= 1 ? pageParam : 1;
   // The result remembers which query it answers; loading = the current query has no result yet.
   const key = new URLSearchParams({ ...filters, page: String(page), pageSize: String(PAGE_SIZE) }).toString();
   const [result, setResult] = useState<{ key: string; data?: Page; error?: string } | null>(null);
@@ -55,10 +64,17 @@ export function OrdersList() {
     return () => ctrl.abort();
   }, [key]);
 
-  const set = (key: string, value: string) => {
-    setFilters((f) => ({ ...f, [key]: value }));
-    setPage(1);
+  const update = (changes: Record<string, string>) => {
+    const next = new URLSearchParams(params.toString());
+    for (const [k, v] of Object.entries(changes)) {
+      if (v && !(k === "page" && v === "1")) next.set(k, v);
+      else next.delete(k);
+    }
+    const qs = next.toString();
+    window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
   };
+  const set = (key: string, value: string) => update({ [key]: value, page: "" });
+  const setPage = (fn: (p: number) => number) => update({ page: String(fn(page)) });
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
 
   return (

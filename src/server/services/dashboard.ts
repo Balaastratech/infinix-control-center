@@ -24,7 +24,7 @@ const RECENT = 10;
 const countBy = (rows: { k: string; n: number }[]) => Object.fromEntries(rows.map((r) => [r.k, r.n]));
 
 // Cancelled orders holding a captured payment with nothing refunded (failed refunds don't count).
-function owedRefunds() {
+export function owedRefunds() {
   const rows = getDb()
     .select({
       orderId: orders.id,
@@ -48,7 +48,7 @@ function owedRefunds() {
 }
 
 // Shipped or delivered orders whose payment failed. Fix = support ticket; stays here until upstream shows it paid.
-function unpaidShipped() {
+export function unpaidShipped() {
   const rows = getDb()
     .select({ orderId: orders.id, status: orders.status, amountMinor: orders.amountMinor })
     .from(orders)

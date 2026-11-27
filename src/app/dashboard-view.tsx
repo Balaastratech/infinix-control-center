@@ -156,7 +156,7 @@ export function DashboardView({ canOperate }: { canOperate: boolean }) {
           {ORDER_STATUSES.map((s, i) => (
             <span key={s}>
               {i > 0 && " · "}
-              {s}: {data.orders.byStatus[s] ?? 0}
+              <Link href={`/orders?orderStatus=${s}`}>{s}: {data.orders.byStatus[s] ?? 0}</Link>
             </span>
           ))}
         </p>
@@ -165,7 +165,9 @@ export function DashboardView({ canOperate }: { canOperate: boolean }) {
       <section>
         <h2>Issues</h2>
         <ul>
-          <li>Failed payments: {data.paymentIssues.failedPayments}</li>
+          <li>
+            <Link href="/orders?paymentStatus=failed">Failed payments: {data.paymentIssues.failedPayments}</Link>
+          </li>
           <li>
             Failed refunds: {data.paymentIssues.failedRefunds.count}
             {data.paymentIssues.failedRefunds.items.map((r) => (
@@ -175,7 +177,9 @@ export function DashboardView({ canOperate }: { canOperate: boolean }) {
               </span>
             ))}
           </li>
-          <li>Delayed shipments: {data.shipmentIssues.delayed}</li>
+          <li>
+            <Link href="/orders?shipmentStatus=delayed">Delayed shipments: {data.shipmentIssues.delayed}</Link>
+          </li>
           <li>
             Shipment lookup errors: {data.shipmentIssues.lookupErrors.count}
             {data.shipmentIssues.lookupErrors.items.map((l) => (
@@ -221,7 +225,9 @@ export function DashboardView({ canOperate }: { canOperate: boolean }) {
       </section>
 
       <section>
-        <h2>Local ahead of upstream: {data.localAhead.length}</h2>
+        <h2>
+          <Link href="/orders?localAhead=true">Local ahead of upstream: {data.localAhead.length}</Link>
+        </h2>
         {data.localAhead.length === 0 ? (
           <p>None: local data agrees with upstream.</p>
         ) : (
