@@ -22,6 +22,32 @@ function amountsIn(text: string): Set<number> {
   return out;
 }
 
+// Numbers a summary may derive from the facts: the sum or difference of two values, a sum of a consecutive run of
+// values (a table column total), or the grand total. ponytail: O(n^2) over the fact values; n is a few hundred at most.
+export function derivable(values: number[]): Set<number> {
+  const out = new Set<number>();
+  const distinct = [...new Set(values)];
+  for (let i = 0; i < distinct.length; i++)
+    for (let j = i + 1; j < distinct.length; j++) {
+      out.add(distinct[i] + distinct[j]);
+      out.add(Math.abs(distinct[i] - distinct[j]));
+    }
+  for (let i = 0; i < values.length; i++) {
+    let run = values[i];
+    for (let j = i + 1; j < values.length; j++) out.add((run += values[j]));
+  }
+  return out;
+}
+
+function amountList(text: string): number[] {
+  const out: number[] = [];
+  for (const m of text.matchAll(AMOUNT)) {
+    const p = amountToPaise(m[1], m[2]);
+    if (p !== null) out.push(p);
+  }
+  return out;
+}
+
 export function checkSummary(summary: string, facts: string, question: string, opts: { customerNames: string[]; secrets: string[]; systemPrompt: string }): SummaryCheck {
   const reasons: string[] = [];
   const s = summary.trim();
@@ -49,9 +75,10 @@ export function checkSummary(summary: string, facts: string, question: string, o
     rest = rest.replace(id, " ");
   }
   const known = amountsIn(factText);
+  let derived: Set<number> | null = null; // built only if needed
   for (const m of s.matchAll(AMOUNT)) {
     const p = amountToPaise(m[1], m[2]);
-    if (p !== null && !known.has(p)) reasons.push(`unknown amount ${m[0].trim()}`);
+    if (p !== null && !known.has(p) && !(derived ??= derivable(amountList(facts))).has(p)) reasons.push(`unknown amount ${m[0].trim()}`);
     rest = rest.replace(m[0], " ");
   }
   for (const name of opts.customerNames) {
@@ -62,8 +89,12 @@ export function checkSummary(summary: string, facts: string, question: string, o
     }
   }
   const factNumbers = new Set((factText.replace(/(\d),(?=\d)/g, "$1").match(/\d+(?:\.\d+)?/g) ?? []).map(Number));
+  let derivedCounts: Set<number> | null = null; // counts: sums/differences of counts in the facts
   for (const n of rest.replace(/(\d),(?=\d)/g, "$1").match(/\d+(?:\.\d+)?/g) ?? []) {
-    if (!factNumbers.has(Number(n))) reasons.push(`unknown number ${n}`);
+    if (factNumbers.has(Number(n))) continue;
+    // only real counts ("11 cancelled orders"), not ids, names or dates, so an invented count can't sneak through
+    derivedCounts ??= derivable([...facts.matchAll(/\b(\d{1,4}) [a-z]/gi)].map((m) => Number(m[1])));
+    if (!derivedCounts.has(Number(n))) reasons.push(`unknown number ${n}`);
   }
   return { ok: reasons.length === 0, reasons };
 }

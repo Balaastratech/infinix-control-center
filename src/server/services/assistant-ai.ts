@@ -64,7 +64,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
   workflow_runs: "Recent workflow executions, optionally by outcome, order, or ran time range in UTC ISO (ran_from, ran_to).",
   health_and_sync: "Status of the Commerce, Payment and Shipping APIs and the last sync.",
   customers_at_risk: "Customers ranked by money at risk: owed refunds, unpaid shipped/delivered orders, order count and open tickets per customer.",
-  refunds_summary: "Count and sum of succeeded and failed refunds sent to the Payment API, optionally in a created time range in UTC ISO (from, to).",
+  refunds_summary: "Refunds approved by a Manager, paid out (succeeded: the only money that went out) and failed (not paid out), each with count and sum, optionally in a UTC ISO time range (from, to).",
   briefing: "Open issues ranked by urgency and money (money at risk, unpaid shipments, delayed high-value shipments, failed refunds, pending approvals, services down, local-ahead orders). Use for open questions like how are we doing.",
   search_audit: "Audit log entries (who did what), filtered by action like order.cancel or refund.approve, target order id, or actor email.",
   propose_cancel: "Propose cancelling an order. Shows a card the user must confirm; nothing is executed.",
@@ -231,7 +231,9 @@ function assemble(input: AiInput, summary: string, results: { name: ToolName; in
     secrets: [process.env.SESSION_SECRET, process.env.WEBHOOK_SECRET, process.env.ANTHROPIC_API_KEY].filter((s): s is string => Boolean(s)),
     systemPrompt: SYSTEM_PROMPT,
   });
-  const text = check.ok && summary ? summary : blocks.length ? "Here's what I found:" : "I don't have that.";
+  // A dropped summary is replaced by the first tool's own deterministic sentence, never a bare "Here's what I found:".
+  const firstFact = results.find((r) => r.result.outcome === "ok") ?? results[0];
+  const text = check.ok && summary ? summary : (firstFact?.result.title ?? "I don't have that.");
   const list = [...results].reverse().find((r) => (r.name === "find_orders" || r.name === "count_orders") && r.result.outcome === "ok");
   const context: AssistantContext | null = list
     ? { intent: list.name, filters: stripIds(list.result.filters), resultIds: list.result.resultIds }

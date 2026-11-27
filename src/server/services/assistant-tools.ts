@@ -391,14 +391,18 @@ function customersAtRisk(): ToolResult {
   }] : []);
 }
 
-// Refunds sent to the Payment API in a time range (UTC ISO; default all time): count and sum, succeeded vs failed.
+// Refunds in a time range (UTC ISO; default all time): approved, paid out (succeeded) and failed, each counted and summed.
 function refundsSummary(from: string | undefined, to: string | undefined): ToolResult {
   const rows = getDb().select().from(refunds).all().filter((r) => (!from || r.createdAt >= from) && (!to || r.createdAt < to));
   const part = (st: string) => { const x = rows.filter((r) => r.status === st); return { n: x.length, sum: x.reduce((s2, r) => s2 + r.amountMinor, 0) }; };
   const ok = part("succeeded");
   const bad = part("failed");
   const when = from || to ? ` ${from ? `since ${formatIst(from)}` : ""}${from && to ? " and " : ""}${to ? `before ${formatIst(to)}` : ""}` : "";
-  const said = `${plural(ok.n, "refund")} succeeded${when}, ${formatMoney(ok.sum)} paid out; ${plural(bad.n, "refund")} failed (${formatMoney(bad.sum)}).`;
+  // Approved = a Manager said yes (decided in the range). Paid out = succeeded at the Payment API: the only money
+  // that went out. Failed refunds are stated so the AI can't count them as money out.
+  const approved = listApprovals().filter((x) => x.status === "approved" && x.decidedAt && (!from || x.decidedAt >= from) && (!to || x.decidedAt < to));
+  const approvedSum = approved.reduce((s2, x) => s2 + (x.amountMinor ?? 0), 0);
+  const said = `${plural(approved.length, "refund")} approved${when} (${formatMoney(approvedSum)}). Paid out (succeeded): ${plural(ok.n, "refund")}, ${formatMoney(ok.sum)}; that is the money that went out. Failed: ${plural(bad.n, "refund")}, ${formatMoney(bad.sum)}, not paid out.`;
   return result(said, rows.length ? [{
     kind: "table",
     title: "Refunds (newest first)",

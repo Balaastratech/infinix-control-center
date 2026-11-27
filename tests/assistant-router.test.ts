@@ -138,8 +138,9 @@ describe("new read tools on the sample data", () => {
       { id: "R-4", orderId: "NC-1048", amountMinor: 999900, currency: "INR", status: "succeeded", createdAt: "2026-11-20T07:00:00.000Z" },
     ]).run();
     const today = runTool("refunds_summary", { from: "2026-11-26T18:30:00.000Z", to: "2026-11-27T18:30:00.000Z" }, viewer());
-    expect(today.title).toMatch(/^2 refunds succeeded since .* and before .*, ₹5,000\.00 paid out; 1 refund failed \(₹500\.00\)\.$/);
-    expect(runTool("refunds_summary", {}, viewer()).title).toBe("3 refunds succeeded, ₹14,999.00 paid out; 1 refund failed (₹500.00).");
+    // "money went out" = succeeded only; the failed one is stated as not paid out
+    expect(today.title).toMatch(/^0 refunds approved since .* and before .* \(₹0\.00\)\. Paid out \(succeeded\): 2 refunds, ₹5,000\.00; that is the money that went out\. Failed: 1 refund, ₹500\.00, not paid out\.$/);
+    expect(runTool("refunds_summary", {}, viewer()).title).toBe("0 refunds approved (₹0.00). Paid out (succeeded): 3 refunds, ₹14,999.00; that is the money that went out. Failed: 1 refund, ₹500.00, not paid out.");
   });
 });
 
