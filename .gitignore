@@ -1,6 +1,31 @@
+# dependencies
 node_modules/
+/.pnp
+.pnp.*
+
+# env files
 .env*
 !.env.example
+
+# sqlite
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
+/data/
+
+# next.js
 .next/
+/out/
+/build
+
+# testing
+/coverage
+
+# misc
+.DS_Store
+*.pem
+npm-debug.log*
+.vercel
+*.tsbuildinfo
+next-env.d.ts
