@@ -6,11 +6,11 @@ import { z } from "zod";
 import { isValidId } from "@/server/clients/mock";
 import { config } from "@/server/config";
 import { getDb } from "@/server/db";
-import { orders, payments, shipments, webhookEvents, WEBHOOK_STATUSES } from "@/server/db/schema";
+import { orders, payments, SHIPMENT_STATUSES, shipments, webhookEvents, WEBHOOK_STATUSES } from "@/server/db/schema";
 import { audit } from "./audit";
 import { onWebhookEvent } from "./workflows";
 
-export const SHIPMENT_STATUSES = ["pending", "shipped", "delayed", "delivered", "cancelled"] as const;
+export { SHIPMENT_STATUSES };
 
 // Allowed data.status per known event type. Any other type is stored as "ignored".
 const KNOWN_TYPES: Record<string, readonly string[]> = {

@@ -32,6 +32,20 @@ function ensureEnvFile() {
   console.log(`${ENV_FILE}: generated ${missing.join(", ")}`);
 }
 
+// Same rules and shape as seedWorkflows() in src/server/services/workflows.ts (the app validates them on edit).
+function seedWorkflows(sqlite) {
+  const { n } = sqlite.prepare("SELECT COUNT(*) AS n FROM workflows").get();
+  if (n > 0) return console.log(`workflows: ${n} already present, seed skipped`);
+  const seed = JSON.parse(fs.readFileSync("src/server/db/seed-workflows.json", "utf8"));
+  const insert = sqlite.prepare("INSERT INTO workflows (name, trigger, conditions, action, action_params, enabled) VALUES (?, ?, ?, ?, ?, ?)");
+  sqlite.transaction(() =>
+    seed.forEach(({ name, trigger, conditions, action: { type, ...params }, enabled }) =>
+      insert.run(name, trigger, JSON.stringify(conditions), type, JSON.stringify(params), enabled ? 1 : 0),
+    ),
+  )();
+  console.log(`workflows: seeded ${seed.map((w) => w.name).join(", ")}`);
+}
+
 function main() {
   ensureEnvFile();
   process.loadEnvFile(ENV_FILE);
@@ -54,6 +68,7 @@ function main() {
     sqlite.transaction(() => DEMO_USERS.forEach(([email, role]) => insert.run(email, hash, role)))();
     console.log(`users: seeded ${DEMO_USERS.map(([e]) => e).join(", ")} (password ${DEMO_PASSWORD})`);
   }
+  seedWorkflows(sqlite);
   sqlite.close();
 }
 

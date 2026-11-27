@@ -23,6 +23,10 @@ export const OPERATION_STATUSES = [
   "failed",
   "rejected",
 ] as const;
+// Upstream value sets (docs/external-apis.md).
+export const ORDER_STATUSES = ["processing", "shipped", "delivered", "cancelled"] as const;
+export const PAYMENT_STATUSES = ["captured", "failed"] as const;
+export const SHIPMENT_STATUSES = ["pending", "shipped", "delayed", "delivered", "cancelled"] as const;
 export const APPROVAL_STATUSES = ["pending", "approved", "rejected"] as const;
 export const WORKFLOW_TRIGGERS = ["payment.failed", "shipment.updated", "order.cancelled"] as const;
 export const WORKFLOW_ACTIONS = ["create_ticket", "request_refund"] as const;

@@ -7,7 +7,7 @@ export type ApiResult<T> = { ok: true; status: number; data: T } | { ok: false; 
 
 const TIMEOUT_MS = 5000;
 const MAX_ATTEMPTS = 3;
-const BACKOFF_MS = [200, 400]; // wait before attempt 2 and attempt 3
+export const BACKOFF_MS = [200, 400]; // wait before attempt 2 and attempt 3
 const ID_RE = /^[A-Za-z0-9-]{1,64}$/;
 
 export function isValidId(id: unknown): id is string {

@@ -12,9 +12,7 @@ import { refundPosition } from "./refunds";
 import { shipmentRow, upsertShipment } from "./sync";
 import { onWebhookEvent } from "./workflows";
 
-export const ORDER_STATUSES = ["processing", "shipped", "delivered", "cancelled"] as const;
-export const PAYMENT_STATUSES = ["captured", "failed"] as const;
-export { SHIPMENT_STATUSES } from "./webhooks";
+export { ORDER_STATUSES, PAYMENT_STATUSES, SHIPMENT_STATUSES } from "@/server/db/schema";
 
 const NOT_CANCELLABLE_ORDER = ["shipped", "delivered"];
 const NOT_CANCELLABLE_SHIPMENT = ["shipped", "delayed", "delivered"];

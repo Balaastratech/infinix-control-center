@@ -1,0 +1,19 @@
+[
+  {
+    "name": "Delayed high-value shipment",
+    "trigger": "shipment.updated",
+    "conditions": [
+      { "field": "shipment_status", "op": "eq", "value": "delayed" },
+      { "field": "amount_minor", "op": "gt", "value": 500000 }
+    ],
+    "action": { "type": "create_ticket", "reason": "Delayed shipment on high-value order {order_id} ({amount})" },
+    "enabled": true
+  },
+  {
+    "name": "Refund cancelled paid orders",
+    "trigger": "order.cancelled",
+    "conditions": [{ "field": "payment_status", "op": "eq", "value": "captured" }],
+    "action": { "type": "request_refund" },
+    "enabled": true
+  }
+]
