@@ -1,6 +1,15 @@
 import { getDb } from "@/server/db";
 import { auditLog } from "@/server/db/schema";
 
+// Who did something: a logged-in user, or a workflow (userId null, label "workflow:<name>").
+export interface Actor {
+  userId: number | null;
+  label: string;
+  role: string | null;
+}
+
+export const userActor = (u: { id: number; email: string; role: string }): Actor => ({ userId: u.id, label: u.email, role: u.role });
+
 export interface AuditEntry {
   userId?: number | null;
   actorLabel: string; // email, "workflow:<name>", "webhook" or "system"

@@ -27,7 +27,7 @@ export function setupTestDb() {
 // Empty every upstream-copy and integration table (users stay). Call between tests that sync or receive webhooks.
 export function clearData() {
   const db = getDb();
-  for (const table of ["refunds", "tickets", "orders", "payments", "shipments", "customers", "webhook_events", "sync_runs", "service_health", "audit_log"]) {
+  for (const table of ["refunds", "tickets", "approvals", "operations", "orders", "payments", "shipments", "customers", "webhook_events", "sync_runs", "service_health", "audit_log"]) {
     db.run(sql.raw(`DELETE FROM ${table}`));
   }
 }

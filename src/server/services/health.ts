@@ -1,5 +1,6 @@
 import { desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/server/db";
+import type { ApiResult } from "@/server/clients/mock";
 import { serviceHealth, SERVICES, syncRuns } from "@/server/db/schema";
 
 export type Service = (typeof SERVICES)[number];
@@ -29,6 +30,12 @@ export function recordHealth(service: Service, ok: boolean, error?: string): voi
       })
       .run();
   }
+}
+
+// Health from one live call. A business answer (400/404/409) means the service is up; network errors and 5xx mean down.
+export function recordResult(service: Service, res: ApiResult<unknown>): void {
+  const up = res.ok || (res.status !== null && res.status < 500);
+  recordHealth(service, up, res.ok ? undefined : res.error);
 }
 
 export interface ServiceStatus {

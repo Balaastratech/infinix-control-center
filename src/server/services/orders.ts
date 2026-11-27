@@ -1,0 +1,220 @@
+// Orders: list/search, detail (with a live shipment lookup), and cancel through the Commerce API.
+// Cancel rule: CLAUDE.md "Business rules". Cancels need no approval.
+import { and, asc, desc, eq, or, sql, type SQL } from "drizzle-orm";
+import { z } from "zod";
+import { orderPath, request } from "@/server/clients/mock";
+import { getDb } from "@/server/db";
+import { customers, operations, orders, payments, refunds, shipments, tickets, webhookEvents } from "@/server/db/schema";
+import { formatIst } from "@/lib/format";
+import { audit, type Actor } from "./audit";
+import { recordResult } from "./health";
+import { refundPosition } from "./refunds";
+import { shipmentRow, upsertShipment } from "./sync";
+import { onWebhookEvent } from "./workflows";
+
+export const ORDER_STATUSES = ["processing", "shipped", "delivered", "cancelled"] as const;
+export const PAYMENT_STATUSES = ["captured", "failed"] as const;
+export { SHIPMENT_STATUSES } from "./webhooks";
+
+const NOT_CANCELLABLE_ORDER = ["shipped", "delivered"];
+const NOT_CANCELLABLE_SHIPMENT = ["shipped", "delayed", "delivered"];
+
+// ---------- list ----------
+
+export interface OrderListQuery {
+  q?: string;
+  orderStatus?: string;
+  paymentStatus?: string;
+  shipmentStatus?: string;
+  localAhead?: boolean;
+  page: number;
+  pageSize: number;
+}
+
+// "Local ahead": a webhook (or our own action) set a status upstream doesn't show yet.
+const orderAhead = sql`(${orders.upstreamStatus} IS NOT NULL AND ${orders.status} <> ${orders.upstreamStatus})`;
+const paymentAhead = sql`(${payments.upstreamStatus} IS NOT NULL AND ${payments.status} <> ${payments.upstreamStatus})`;
+const localAhead = sql<number>`(${orderAhead} OR coalesce(${paymentAhead}, 0))`;
+
+const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => "\\" + c);
+
+export function listOrders(query: OrderListQuery) {
+  const db = getDb();
+  const where: SQL[] = [];
+  if (query.q) {
+    const p = `%${escapeLike(query.q)}%`;
+    where.push(
+      or(
+        sql`${orders.id} LIKE ${p} ESCAPE '\\'`,
+        sql`${customers.name} LIKE ${p} ESCAPE '\\'`,
+        sql`${customers.email} LIKE ${p} ESCAPE '\\'`,
+      )!,
+    );
+  }
+  if (query.orderStatus) where.push(eq(orders.status, query.orderStatus));
+  if (query.paymentStatus) where.push(eq(payments.status, query.paymentStatus));
+  if (query.shipmentStatus) where.push(eq(shipments.status, query.shipmentStatus));
+  if (query.localAhead) where.push(localAhead);
+  const cond = where.length ? and(...where) : undefined;
+
+  const total = db
+    .select({ n: sql<number>`count(*)` })
+    .from(orders)
+    .leftJoin(customers, eq(customers.id, orders.customerId))
+    .leftJoin(payments, eq(payments.orderId, orders.id))
+    .leftJoin(shipments, eq(shipments.orderId, orders.id))
+    .where(cond)
+    .get()!.n;
+  const rows = db
+    .select({
+      id: orders.id,
+      status: orders.status,
+      upstreamStatus: orders.upstreamStatus,
+      amountMinor: orders.amountMinor,
+      createdAt: orders.createdAt,
+      customerName: customers.name,
+      customerEmail: customers.email,
+      paymentStatus: payments.status,
+      paymentUpstreamStatus: payments.upstreamStatus,
+      shipmentStatus: shipments.status,
+      localAhead,
+    })
+    .from(orders)
+    .leftJoin(customers, eq(customers.id, orders.customerId))
+    .leftJoin(payments, eq(payments.orderId, orders.id))
+    .leftJoin(shipments, eq(shipments.orderId, orders.id))
+    .where(cond)
+    .orderBy(desc(orders.createdAt), desc(orders.id))
+    .limit(query.pageSize)
+    .offset((query.page - 1) * query.pageSize)
+    .all();
+  return {
+    items: rows.map((r) => ({ ...r, localAhead: Boolean(r.localAhead) })),
+    total,
+    page: query.page,
+    pageSize: query.pageSize,
+  };
+}
+
+// ---------- detail ----------
+
+// Live shipment read: refresh the local row (same merge rule as sync) or say why we show the stored one.
+async function refreshShipment(orderId: string): Promise<string | null> {
+  const path = orderPath("/shipping/shipments/", orderId);
+  if (!path) return "Shipping lookup failed: invalid order id";
+  const res = await request<unknown>("GET", path);
+  recordResult("shipping", res);
+  const parsed = res.ok ? shipmentRow.safeParse(res.data) : null;
+  if (parsed?.success && parsed.data.order_id === orderId) {
+    getDb().transaction(() => upsertShipment(parsed.data, new Date().toISOString()));
+    return null;
+  }
+  const stored = getDb().select().from(shipments).where(eq(shipments.orderId, orderId)).get();
+  const error = res.ok ? "unexpected reply shape" : res.error;
+  return `Shipping lookup failed: ${error}, showing data from ${formatIst(stored?.syncedAt ?? stored?.updatedAt)}`;
+}
+
+export async function getOrderDetail(orderId: string) {
+  const db = getDb();
+  const order = db.select().from(orders).where(eq(orders.id, orderId)).get();
+  if (!order) return null;
+  const shippingError = await refreshShipment(orderId);
+  const payment = db.select().from(payments).where(eq(payments.orderId, orderId)).get() ?? null;
+  return {
+    order,
+    customer: db.select().from(customers).where(eq(customers.id, order.customerId)).get() ?? null,
+    payment,
+    refundPosition: refundPosition(orderId),
+    refunds: db.select().from(refunds).where(eq(refunds.orderId, orderId)).orderBy(asc(refunds.createdAt)).all(),
+    shipment: db.select().from(shipments).where(eq(shipments.orderId, orderId)).get() ?? null,
+    shippingError,
+    operations: db.select().from(operations).where(eq(operations.orderId, orderId)).orderBy(desc(operations.id)).all(),
+    tickets: db.select().from(tickets).where(eq(tickets.orderId, orderId)).orderBy(asc(tickets.createdAt)).all(),
+    events: db
+      .select()
+      .from(webhookEvents)
+      .where(eq(webhookEvents.orderId, orderId))
+      .orderBy(desc(webhookEvents.receivedAt))
+      .all(),
+  };
+}
+
+// ---------- cancel ----------
+
+export type CancelResult =
+  | { ok: true; operationId: number; status: string }
+  | { ok: false; code: "not_found" | "refused" | "upstream"; reason: string; operationId?: number; httpStatus?: number | null };
+
+// Why our rule refuses a cancel, or null. Checked before any API call.
+function cancelRefusal(orderId: string): string | null {
+  const db = getDb();
+  const order = db.select().from(orders).where(eq(orders.id, orderId)).get()!;
+  if (order.status === "cancelled") return "order is already cancelled";
+  if (NOT_CANCELLABLE_ORDER.includes(order.status)) return `order is ${order.status}`;
+  const shipment = db.select().from(shipments).where(eq(shipments.orderId, orderId)).get();
+  if (shipment && NOT_CANCELLABLE_SHIPMENT.includes(shipment.status)) return `shipment is ${shipment.status}`;
+  return null;
+}
+
+const cancelReply = z.object({ id: z.string(), status: z.string() });
+
+export async function cancelOrder(orderId: string, actor: Actor): Promise<CancelResult> {
+  const db = getDb();
+  const log = (outcome: string, detail: unknown) =>
+    audit({ userId: actor.userId, actorLabel: actor.label, role: actor.role, action: "order.cancel", target: orderId, outcome, detail });
+
+  if (!db.select({ id: orders.id }).from(orders).where(eq(orders.id, orderId)).get()) {
+    return { ok: false, code: "not_found", reason: "unknown order" };
+  }
+  const reason = cancelRefusal(orderId);
+  if (reason) {
+    log("refused", { reason });
+    return { ok: false, code: "refused", reason };
+  }
+
+  const [op] = db
+    .insert(operations)
+    .values({ type: "cancel", orderId, status: "requested", requestedByUserId: actor.userId, requestedByLabel: actor.label })
+    .returning({ id: operations.id })
+    .all();
+  const setOp = (set: Partial<typeof operations.$inferInsert>) =>
+    db.update(operations).set({ ...set, updatedAt: new Date().toISOString() }).where(eq(operations.id, op.id)).run();
+  setOp({ status: "submitted" });
+
+  const res = await request<unknown>("POST", orderPath("/commerce/orders/", orderId) + "/cancel", {});
+  recordResult("commerce", res);
+  const reply = res.ok ? cancelReply.safeParse(res.data) : null;
+  // Final state comes from the answer: only a reply that says "cancelled" for this order is a success.
+  if (!reply?.success || reply.data.id !== orderId || reply.data.status !== "cancelled") {
+    const error = res.ok ? `unexpected reply: ${JSON.stringify(res.data).slice(0, 200)}` : res.error;
+    setOp({ status: "failed", error });
+    log("failed", { operationId: op.id, httpStatus: res.status, error });
+    return { ok: false, code: "upstream", reason: error, operationId: op.id, httpStatus: res.status };
+  }
+
+  const at = new Date().toISOString();
+  const eventId = `app-cancel-${op.id}`;
+  db.transaction(() => {
+    db.update(orders)
+      .set({ status: "cancelled", upstreamStatus: "cancelled", localEventAt: at, localUpdatedAt: at })
+      .where(eq(orders.id, orderId))
+      .run();
+    db.insert(webhookEvents)
+      .values({
+        eventId,
+        source: "app",
+        type: "order.cancelled",
+        orderId,
+        occurredAt: at,
+        payload: JSON.stringify({ event_id: eventId, type: "order.cancelled", occurred_at: at, order_id: orderId, data: { status: "cancelled" } }),
+        status: "applied",
+        note: `cancelled in app by ${actor.label}`,
+      })
+      .run();
+    setOp({ status: "succeeded" });
+  });
+  log("succeeded", { operationId: op.id });
+  // Our own successful cancel fires order.cancelled workflows (agreed decision), once per cancel.
+  await onWebhookEvent({ eventId, type: "order.cancelled", orderId, occurredAt: at, data: { status: "cancelled" } });
+  return { ok: true, operationId: op.id, status: "cancelled" };
+}

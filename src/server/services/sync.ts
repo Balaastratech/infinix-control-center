@@ -29,7 +29,7 @@ const refundRow = z.object({
   currency: z.string(),
   status: z.string(),
 });
-const shipmentRow = z.object({ id: z.string(), order_id: z.string(), status: z.string(), updated_at: z.string() });
+export const shipmentRow = z.object({ id: z.string(), order_id: z.string(), status: z.string(), updated_at: z.string() });
 
 class SyncError extends Error {}
 
@@ -121,23 +121,24 @@ async function syncPayments(at: string): Promise<Counts> {
 
 async function syncShipping(at: string): Promise<Counts> {
   const ss = await fetchList("/shipping/shipments", shipmentRow);
-  const db = getDb();
-  db.transaction(() => {
-    for (const s of ss) {
-      const local = db.select().from(shipments).where(eq(shipments.id, s.id)).get();
-      const upstream = { orderId: s.order_id, upstreamStatus: s.status, upstreamUpdatedAt: s.updated_at, syncedAt: at };
-      if (!local) {
-        db.insert(shipments).values({ id: s.id, status: s.status, updatedAt: s.updated_at, ...upstream }).run();
-      } else {
-        const wins = upstreamShipmentWins(local.updatedAt, s.updated_at);
-        db.update(shipments)
-          .set(wins ? { ...upstream, status: s.status, updatedAt: s.updated_at } : upstream)
-          .where(eq(shipments.id, s.id))
-          .run();
-      }
-    }
-  });
+  getDb().transaction(() => ss.forEach((s) => upsertShipment(s, at)));
   return { shipments: ss.length };
+}
+
+// One upstream shipment into the local copy (sync, and the live lookup on order detail).
+export function upsertShipment(s: z.infer<typeof shipmentRow>, at: string): void {
+  const db = getDb();
+  const local = db.select().from(shipments).where(eq(shipments.id, s.id)).get();
+  const upstream = { orderId: s.order_id, upstreamStatus: s.status, upstreamUpdatedAt: s.updated_at, syncedAt: at };
+  if (!local) {
+    db.insert(shipments).values({ id: s.id, status: s.status, updatedAt: s.updated_at, ...upstream }).run();
+  } else {
+    const wins = upstreamShipmentWins(local.updatedAt, s.updated_at);
+    db.update(shipments)
+      .set(wins ? { ...upstream, status: s.status, updatedAt: s.updated_at } : upstream)
+      .where(eq(shipments.id, s.id))
+      .run();
+  }
 }
 
 // Refunds and tickets: upstream copy by id. Rows we have that upstream no longer lists (mock restarted) are flagged.
