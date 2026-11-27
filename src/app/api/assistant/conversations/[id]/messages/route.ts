@@ -14,6 +14,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   if (!device || !/^[0-9a-f-]{36}$/.test(id)) return jsonError(404, "conversation not found");
   const body = await parseBody(req, z.object({ text: z.string().trim().min(1).max(limits.maxChars) }).strict());
   if (body instanceof Response) return body;
-  const r = ask({ userId: auth.id, device }, auth, body.text, id);
+  const r = await ask({ userId: auth.id, device }, auth, body.text, id);
   return r.ok ? Response.json(r) : jsonError(r.status, r.error);
 }

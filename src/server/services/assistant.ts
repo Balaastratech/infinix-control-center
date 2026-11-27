@@ -6,7 +6,9 @@ import type { AuthUser } from "@/server/auth/require-role";
 import { audit, userActor } from "./audit";
 import { parse, type AssistantContext } from "./assistant-parser";
 import { runTool } from "./assistant-tools";
-import { addTurn, createConversation, lastContext, limits, messageCount, type Owner, type StoredAnswer, type ToolLog } from "./conversations";
+import { answerWithAi, aiConfig } from "./assistant-ai";
+import { recordUsage, reserveAiSlot } from "./assistant-usage";
+import { addTurn, createConversation, lastContext, limits, messageCount, recentTurns, type Owner, type StoredAnswer, type ToolLog } from "./conversations";
 
 export interface Answer {
   answer: StoredAnswer;
@@ -75,7 +77,31 @@ export type AskOutcome =
   | { ok: true; conversationId: string; answer: StoredAnswer; droppedOldest?: boolean }
   | { ok: false; status: 404 | 409 | 429; error: string };
 
-export function ask(owner: Owner, user: AuthUser, text: string, conversationId: string | null): AskOutcome {
+const HISTORY_TURNS = 6;
+
+// Parser first (free, deterministic). Only a question the parser can't place goes to the AI, if it is on and the daily
+// caps allow; any AI failure falls back to the parser's answer with a note.
+async function answer(owner: Owner, id: string, text: string, user: AuthUser): Promise<Answer> {
+  const last = lastContext(owner, id);
+  const parsed = answerWithParser(text, user, last);
+  recordUsage(user.id, { questions: 1 });
+  if (parsed.answer.intent !== "no_match" || !aiConfig.enabled) return parsed;
+  const slot = reserveAiSlot(user.id);
+  if (!slot.ok) return { answer: { ...parsed.answer, notice: slot.notice }, calls: parsed.calls };
+  const ai = await answerWithAi({ question: text, user, last, history: recentTurns(owner, id, HISTORY_TURNS), customerNames: customerList().map((c) => c.name) });
+  for (const c of ai.calls) {
+    if (c.outcome === "denied" || c.outcome === "invalid" || c.outcome === "not_allowed") {
+      audit({ ...actorFields(user), action: "assistant.tool", target: c.tool.slice(0, 60), outcome: c.outcome, detail: { source: "ai" } });
+    }
+  }
+  if (ai.ok) return { answer: ai.answer, calls: ai.calls };
+  return {
+    answer: { ...parsed.answer, mode: "fallback", notice: "AI unavailable for this question, so this is the built-in answer." },
+    calls: [...ai.calls, { source: "ai", tool: "(fallback)", input: { reason: ai.reason }, outcome: "error", ms: 0 }],
+  };
+}
+
+export async function ask(owner: Owner, user: AuthUser, text: string, conversationId: string | null): Promise<AskOutcome> {
   if (overBurst(user.id)) return { ok: false, status: 429, error: `Too many questions: at most ${BURST_PER_MIN} per minute.` };
   let id = conversationId;
   let dropped = false;
@@ -86,7 +112,7 @@ export function ask(owner: Owner, user: AuthUser, text: string, conversationId: 
     if (n === null) return { ok: false, status: 404, error: "conversation not found" };
     if (n + 2 > limits.maxMessages) return { ok: false, status: 409, error: "This conversation is full. Start a new one." };
   }
-  const { answer, calls } = answerWithParser(text, user, lastContext(owner, id));
-  if (!addTurn(owner, id, text, answer, calls)) return { ok: false, status: 404, error: "conversation not found" };
-  return { ok: true, conversationId: id, answer, droppedOldest: dropped || undefined };
+  const { answer: a, calls } = await answer(owner, id, text, user);
+  if (!addTurn(owner, id, text, a, calls)) return { ok: false, status: 404, error: "conversation not found" };
+  return { ok: true, conversationId: id, answer: a, droppedOldest: dropped || undefined };
 }

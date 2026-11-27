@@ -169,3 +169,17 @@ export function addTurn(owner: Owner, id: string, question: string, answer: Stor
     return true;
   });
 }
+
+// The last n messages as plain text, for the AI's quoted history. Owner-scoped like everything else here.
+export function recentTurns(owner: Owner, id: string, n: number): { role: "user" | "assistant"; text: string }[] {
+  const db = getDb();
+  if (!db.select({ id: assistantConversations.id }).from(assistantConversations).where(mine(owner, id)).get()) return [];
+  return db
+    .select({ role: assistantMessages.role, text: assistantMessages.text })
+    .from(assistantMessages)
+    .where(eq(assistantMessages.conversationId, id))
+    .orderBy(desc(assistantMessages.id))
+    .limit(n)
+    .all()
+    .reverse();
+}

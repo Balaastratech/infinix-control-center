@@ -25,6 +25,6 @@ export async function POST(req: Request) {
   const body = await parseBody(req, z.object({ text: z.string().trim().min(1).max(limits.maxChars) }).strict());
   if (body instanceof Response) return body;
   const { device, setCookie } = ensureDevice(req);
-  const r = ask({ userId: auth.id, device }, auth, body.text, null);
+  const r = await ask({ userId: auth.id, device }, auth, body.text, null);
   return withCookie(r.ok ? Response.json(r) : jsonError(r.status, r.error), setCookie);
 }

@@ -9,9 +9,11 @@
     "lint": "eslint",
     "setup": "node scripts/setup.mjs",
     "test": "vitest run",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "redteam:live": "node scripts/redteam-live.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.14.0",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^13.2.0",
     "drizzle-orm": "^0.45.4",

@@ -213,7 +213,8 @@ export function parse(raw: string, last: AssistantContext | null, customers: Cus
   }
 
   // Audit: "who cancelled NC-1004", "who approved refunds", "audit for NC-1002".
-  if (/\bwho\b|\bby whom\b|\baudit\b|\bhistory of\b/.test(t)) {
+  const asksWho = /\bwho\b|\bby whom\b/.test(t);
+  if (asksWho || /\baudit\b|\bhistory of\b/.test(t)) {
     const action = /\bapprov/.test(t)
       ? "refund.approve"
       : /\breject/.test(t)
@@ -227,6 +228,7 @@ export function parse(raw: string, last: AssistantContext | null, customers: Cus
               : /\bworkflow/.test(t)
                 ? "workflow.update"
                 : undefined;
+    if (asksWho && !action && !orderId && !/audit/.test(t)) return noMatch(t); // "who won the world cup"
     const input: Record<string, unknown> = {};
     if (action) input.action = action;
     if (orderId) input.target = orderId;
@@ -299,7 +301,7 @@ export function parse(raw: string, last: AssistantContext | null, customers: Cus
     const input: Record<string, unknown> = { ...merged };
     if (refersBack) input.order_ids = last!.resultIds ?? [];
     const intent = counting ? "count_orders" : "find_orders";
-    return tool(intent, input, [intent === "count_orders" ? "count orders" : "orders", ...(parts.length ? parts : ["same filters"]), refersBack ? "within your previous result" : "added to your previous filters"]);
+    return tool(intent, input, [intent === "count_orders" ? "count orders" : "orders", ...describe(merged), refersBack ? "within your previous result" : "added to your previous filters"]);
   }
 
   const mentionsOrders = /\b(orders?|shipments?|payments?|purchases?)\b/.test(t);
@@ -308,10 +310,24 @@ export function parse(raw: string, last: AssistantContext | null, customers: Cus
     const intent = counting ? "count_orders" : "find_orders";
     return tool(intent, { ...filters }, [intent === "count_orders" ? "count orders" : "orders", ...(parts.length ? parts : ["no filter"])]);
   }
-  return {
-    intent: "no_match",
-    understood: "I understood: nothing I can look up",
-    question: "I didn't understand that. Try one of these:",
-    suggestions: suggest(t),
-  };
+  return noMatch(t);
+}
+
+// Readable filter list for the "I understood" line (used for follow-ups, where filters carry over).
+function describe(f: OrderFilters): string[] {
+  const out: string[] = [];
+  if (f.shipmentStatus) out.push(`shipment ${f.shipmentStatus}`);
+  if (f.paymentStatus) out.push(`payment ${f.paymentStatus}`);
+  if (f.localAhead) out.push("local ahead");
+  if (f.orderStatus) out.push(`order ${f.orderStatus}`);
+  if (f.minAmountMinor !== undefined) out.push(`amount over ${formatMoney(f.minAmountMinor)}`);
+  if (f.maxAmountMinor !== undefined) out.push(`amount under ${formatMoney(f.maxAmountMinor)}`);
+  if (f.createdFrom) out.push(`placed from ${f.createdFrom.slice(0, 16)} UTC`);
+  if (f.createdTo) out.push(`placed before ${f.createdTo.slice(0, 16)} UTC`);
+  if (f.customerId) out.push(`customer ${f.customerId}`);
+  return out.length ? out : ["no filter"];
+}
+
+function noMatch(t: string): Parsed {
+  return { intent: "no_match", understood: "I understood: nothing I can look up", question: "I didn't understand that. Try one of these:", suggestions: suggest(t) };
 }

@@ -273,5 +273,18 @@ Slice (a), 27-11-2026:
 - **Confirm audit:** the Confirm button calls the unchanged order routes, so the audit entry is exactly what the order page writes (as the user). No `via: "assistant"` marker was added. A denied or invalid assistant tool call writes its own `assistant.tool` audit row.
 - **Tool schemas:** the zod input schemas for all 14 tools exist from slice (a) (`TOOL_SCHEMAS` in `assistant-tools.ts`, `.strict()`). The parser goes through the same validation the AI will use.
 
+Slice (b), 27-11-2026:
+- **When the AI runs:** only when the parser finds no match. An *ambiguous* question keeps the parser's "which one did you mean?" reply, because a clarifying question beats a model guess.
+- **No-tool AI replies:** a reply that used no tool is always replaced by the fixed line "I can only help with NovaCommerce operations, and I don't have that." plus suggestions. This is stricter than the design's "≤ 200 chars and grounded" rule: a short poem would have passed that.
+- **Results list:** every AI answer starts with a "Results" list holding each tool's own headline (counts, refusal reasons, role denials), then the tool tables. The model's summary sits above them, and only if it passes the check.
+- **Grounding check extras:** it also drops summaries that claim an action ("I have cancelled…"), claim a role change ("you are now admin"), contain a secret value, quote the system prompt, or exceed 400 chars. The answer then carries a notice saying the summary was removed.
+- **Strict tool schemas:** the JSON Schema sent to the API is generated from the same zod schemas, with the constraints strict tool use rejects stripped out (`minimum`/`maximum`, `minLength`/`maxLength`, `pattern`, `minItems`/`maxItems`, `format`). The server still enforces all of them with zod before running a tool.
+- **Caps:** an AI slot is reserved per AI attempt and is not refunded if the call then fails. Questions and tokens are counted per user per IST day in `assistant_usage`.
+- **Refusal fallback:** the server-side `fallbacks` beta is not used, as proposed. Refusals fall back to the parser.
+- **Test seam:** `setCreateMessageForTests()` in `assistant-ai.ts`. The real SDK client is created lazily, only when a question actually reaches the AI with a key set. A test checks that a missing key or `ASSISTANT_AI=off` means no model call.
+- **Red-team suite:** `tests/assistant-redteam.test.ts` has 17 numbered cases plus fallback/kill-switch/cap tests and the grounding table. Design case 8 (other user's conversation → 404) and case 13 (burst 429) also live in `tests/assistant.test.ts`. Every case checks three things: nothing was executed, no secret or system-prompt text appears in the reply or stored chat, and nothing secret was sent to the model.
+- **`npm run redteam:live -- <url>`:** logs in as the demo users on a deployed server and sends 15 hostile prompts through the real model. It checks for leaks, Viewer proposal cards, unsafe links and claimed actions, and diffs the audit counts before and after. The key never leaves the server. It is manual because it spends real AI questions.
+- **Env:** `ANTHROPIC_API_KEY` (server only), `ASSISTANT_AI`, `ASSISTANT_MODEL`, the two caps and the retention/size limits are documented in `.env.example`.
+
 ## Not built
 (Filled in if a slice runs over its time box. Cut order: 1. rename/delete UI, 2. parser table down to 20 phrasings, 3. AI off in the live demo.)
