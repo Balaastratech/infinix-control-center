@@ -8,7 +8,7 @@ import { customers, operations, orders, payments, refunds, shipments, tickets, w
 import { formatIst } from "@/lib/format";
 import { audit, type Actor } from "./audit";
 import { recordNetworkFailure } from "./health";
-import { refundPosition } from "./refunds";
+import { refundPosition, refundRefusal } from "./refunds";
 import { shipmentRow, upsertShipment } from "./sync";
 import { onWebhookEvent } from "./workflows";
 
@@ -128,6 +128,7 @@ export async function getOrderDetail(orderId: string) {
   const payment = db.select().from(payments).where(eq(payments.orderId, orderId)).get() ?? null;
   return {
     order,
+    actions: allowedActions(order), // after the shipment refresh: the cancel rule reads the shipment status
     customer: db.select().from(customers).where(eq(customers.id, order.customerId)).get() ?? null,
     payment,
     refundPosition: refundPosition(orderId),
@@ -266,7 +267,23 @@ export function reconcileCancel(orderId: string, actor: Actor): Promise<CancelRe
   });
 }
 
-// Why a cancel / push-cancel is not possible right now, or null (read-only; used by the assistant's "what next").
-export function cancelBlocker(order: OrderRow, kind: CancelKind = "cancel"): string | null {
-  return REFUSAL[kind](order);
+// What can be done to this order right now, from the same rule functions the write paths use (one source of truth).
+// The order page and the assistant only render this; every write route checks the rule again.
+export interface ActionState {
+  allowed: boolean;
+  reason: string | null;
+}
+export interface AllowedActions {
+  cancel: ActionState;
+  reconcile: ActionState;
+  refund: ActionState;
+}
+
+export function allowedActions(order: OrderRow): AllowedActions {
+  const state = (reason: string | null): ActionState => ({ allowed: reason === null, reason });
+  return {
+    cancel: state(REFUSAL.cancel(order)),
+    reconcile: state(REFUSAL.reconcile(order)),
+    refund: state(refundRefusal(order.id, undefined)),
+  };
 }

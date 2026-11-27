@@ -309,6 +309,19 @@ describe("GET /api/orders/[id]", () => {
   it("404 for an unknown order", async () => {
     expect((await detail("NC-9999")).status).toBe(404);
   });
+
+  it("returns the allowed actions from the server's rules: NC-1001 cannot cancel, NC-1005 cannot refund", async () => {
+    server.use(http.get(`${BASE}/shipping/shipments/:id`, () => HttpResponse.json({ error: "not found" }, { status: 404 })));
+    const shipped = (await detail("NC-1001")).body.actions;
+    expect(shipped.cancel).toEqual({ allowed: false, reason: "order is shipped" });
+
+    const processing = (await detail("NC-1005")).body.actions;
+    expect(processing.refund).toEqual({ allowed: false, reason: "order is processing, not cancelled or delivered" });
+    expect(processing.cancel).toEqual({ allowed: true, reason: null });
+    expect(processing.reconcile.allowed).toBe(false);
+
+    expect((await detail("NC-1002")).body.actions.refund).toEqual({ allowed: true, reason: null }); // delivered + captured
+  });
 });
 
 describe("GET /api/orders", () => {

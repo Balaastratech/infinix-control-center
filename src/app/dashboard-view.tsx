@@ -188,7 +188,7 @@ export function DashboardView({ canOperate }: { canOperate: boolean }) {
                 {SERVICE_NAMES[h.service] ?? h.service} <Badge status={h.status} />
               </span>
               <span className="small muted">
-                Last sync {formatIst(h.lastSyncAt)} {h.lastSyncStatus && <Badge status={h.lastSyncStatus} />}
+                Last sync {formatIst(h.lastSyncAt)}
               </span>
               <span className="small muted">Last OK {formatIst(h.lastOkAt)}</span>
               {h.lastError && <span className="small error">{h.lastError}</span>}

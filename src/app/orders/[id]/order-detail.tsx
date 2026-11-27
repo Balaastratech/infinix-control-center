@@ -16,32 +16,12 @@ interface Detail {
   operations: Row[];
   tickets: Row[];
   events: Row[];
+  actions: Record<"cancel" | "reconcile" | "refund", { allowed: boolean; reason: string | null }>;
 }
 type Busy = "cancel" | "push" | "refund" | null;
 
 // 137550 -> "1375.50" for the amount input (integer maths; the submitted text goes through parseRupees).
 const toRupees = (paise: number) => `${Math.trunc(paise / 100)}.${String(paise % 100).padStart(2, "0")}`;
-
-// ponytail: these mirror the service rules only to decide what to show and explain why. The routes enforce the
-// rules themselves (services/orders.ts, services/refunds.ts) and their answer always wins.
-const BLOCKING_SHIPMENT = ["shipped", "delayed", "delivered"];
-function cancelBlock({ order, shipment }: Detail): string | null {
-  if (order.status === "cancelled") return "Already cancelled.";
-  if (["shipped", "delivered"].includes(order.status)) return `Can't cancel: the order is ${order.status}.`;
-  if (shipment && BLOCKING_SHIPMENT.includes(shipment.status)) return `Can't cancel: the shipment is ${shipment.status}.`;
-  return null;
-}
-function refundBlock({ order, payment, refundPosition: rp }: Detail): string | null {
-  if (payment?.status !== "captured") return `Not refundable: the payment is ${payment?.status ?? "missing"}, not captured.`;
-  if (!["cancelled", "delivered"].includes(order.status)) return "Refundable after the order is cancelled or delivered.";
-  if (rp.refundableMinor <= 0) {
-    return rp.reservedMinor > 0
-      ? `Nothing left to request: ${formatMoney(rp.reservedMinor)} is already waiting for approval.`
-      : "Nothing left to refund: fully refunded.";
-  }
-  return null;
-}
-const needsPush = ({ order }: Detail) => order.status === "cancelled" && order.upstreamStatus === "processing";
 
 export function OrderDetail({ id, canOperate }: { id: string; canOperate: boolean }) {
   const [data, setData] = useState<Detail | null>(null);
@@ -175,10 +155,19 @@ export function OrderDetail({ id, canOperate }: { id: string; canOperate: boolea
               <dd className="num">{formatMoney(rp.refundedMinor)}</dd>
               <dt>In open requests</dt>
               <dd className="num">{formatMoney(rp.reservedMinor)}</dd>
-              <dt>Refundable now</dt>
-              <dd className="num">
-                <b>{formatMoney(rp.refundableMinor)}</b>
-              </dd>
+              {data.actions.refund.allowed ? (
+                <>
+                  <dt>Refundable now</dt>
+                  <dd className="num">
+                    <b>{formatMoney(rp.refundableMinor)}</b>
+                  </dd>
+                </>
+              ) : (
+                <>
+                  <dt className="muted">Refundable once eligible</dt>
+                  <dd className="num muted">{formatMoney(rp.refundableMinor)}</dd>
+                </>
+              )}
             </dl>
           ) : (
             <p className="muted">No payment on record.</p>
@@ -203,7 +192,7 @@ export function OrderDetail({ id, canOperate }: { id: string; canOperate: boolea
       </div>
 
       {canOperate ? (
-        <Actions data={data} busy={busy} onCancel={cancel} onPush={pushCancel}>
+        <Actions data={data} orderAhead={orderAhead} busy={busy} onCancel={cancel} onPush={pushCancel}>
           <RefundAction
             data={data}
             busy={busy}
@@ -272,10 +261,10 @@ export function OrderDetail({ id, canOperate }: { id: string; canOperate: boolea
   );
 }
 
-function Actions({ data, busy, onCancel, onPush, children }: { data: Detail; busy: Busy; onCancel: () => void; onPush: () => void; children: React.ReactNode }) {
-  const cancelReason = cancelBlock(data);
-  const push = needsPush(data);
-  const pushReason = push && data.shipment && BLOCKING_SHIPMENT.includes(data.shipment.status) ? `Can't push: the shipment is ${data.shipment.status}.` : null;
+// Renders the server's allowed actions (GET /api/orders/[id] -> actions); no rule logic here.
+function Actions(props: { data: Detail; orderAhead: boolean; busy: Busy; onCancel: () => void; onPush: () => void; children: React.ReactNode }) {
+  const { data, orderAhead, busy, onCancel, onPush, children } = props;
+  const { cancel, reconcile } = data.actions;
   return (
     <Card title="Actions" flush>
       <div className="actions">
@@ -284,26 +273,26 @@ function Actions({ data, busy, onCancel, onPush, children }: { data: Detail; bus
             <h3>Cancel order</h3>
             <p>Cancels through the Commerce API right away. No approval needed.</p>
           </div>
-          {cancelReason ? (
-            <span className="blocked">{cancelReason}</span>
-          ) : (
+          {cancel.allowed ? (
             <button className="danger" onClick={onCancel} disabled={busy !== null} aria-busy={busy === "cancel"}>
               {busy === "cancel" ? "Cancelling…" : "Cancel order"}
             </button>
+          ) : (
+            <span className="blocked">Can&apos;t cancel: {cancel.reason}.</span>
           )}
         </div>
-        {push && (
+        {(reconcile.allowed || orderAhead) && (
           <div className="action">
             <div className="action-text">
               <h3>Push cancel upstream</h3>
               <p>Cancelled here by a webhook, but the Commerce API still says processing. A refund is refused on approval until it agrees.</p>
             </div>
-            {pushReason ? (
-              <span className="blocked">{pushReason}</span>
-            ) : (
+            {reconcile.allowed ? (
               <button className="primary" onClick={onPush} disabled={busy !== null} aria-busy={busy === "push"}>
                 {busy === "push" ? "Pushing…" : "Push cancel upstream"}
               </button>
+            ) : (
+              <span className="blocked">Can&apos;t push: {reconcile.reason}.</span>
             )}
           </div>
         )}
@@ -322,18 +311,18 @@ function RefundAction(props: {
   onSubmit: (e: React.FormEvent) => void;
 }) {
   const { data, busy, amount, amountError, onAmount, onSubmit } = props;
-  const reason = refundBlock(data);
+  const { refund, reconcile } = data.actions;
   return (
     <div className="action">
       <div className="action-text">
         <h3>Request refund</h3>
         <p>
-          {!reason && `Up to ${formatMoney(data.refundPosition.refundableMinor)}. `}A Manager approves it before the Payment API is called.
-          {needsPush(data) && !reason && " Push the cancel upstream first, or the approval will be refused."}
+          {refund.allowed && `Up to ${formatMoney(data.refundPosition.refundableMinor)}. `}A Manager approves it before the Payment API is called.
+          {refund.allowed && reconcile.allowed && " Push the cancel upstream first, or the approval will be refused."}
         </p>
       </div>
-      {reason ? (
-        <span className="blocked">{reason}</span>
+      {!refund.allowed ? (
+        <span className="blocked">Can&apos;t request a refund: {refund.reason}.</span>
       ) : (
         <form className="row" onSubmit={onSubmit} noValidate>
           <label className="money-input" aria-label="Refund amount in rupees">

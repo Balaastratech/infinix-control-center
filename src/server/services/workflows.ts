@@ -264,7 +264,7 @@ function systemError(event: WorkflowEvent, e: unknown, wf?: Workflow) {
     }
     audit({ actorLabel: wf ? `workflow:${wf.name}` : "system", action: "workflow.error", target: event.orderId, outcome: "failed", detail: { eventId: event.eventId, error } });
   } catch {
-    // ponytail: DB itself is failing; nothing more we can record. The caller's reply must still go out.
+    // NOTE: DB itself is failing; nothing more we can record. The caller's reply must still go out.
   }
 }
 

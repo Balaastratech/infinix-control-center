@@ -8,8 +8,8 @@ import type { AuthUser } from "@/server/auth/require-role";
 import { audit, userActor } from "./audit";
 import { listApprovals } from "./approvals";
 import { owedRefunds, unpaidShipped } from "./dashboard";
-import { cancelBlocker } from "./orders";
-import { refundPosition, refundRefusal, requestRefund, RESERVING_STATUSES } from "./refunds";
+import { allowedActions } from "./orders";
+import { refundPosition, requestRefund, RESERVING_STATUSES } from "./refunds";
 
 export interface Item {
   text: string;
@@ -133,16 +133,15 @@ function nextSteps(
   ops: { type: string; status: string }[],
 ): Item[] {
   const next: string[] = [];
+  const actions = allowedActions(order);
   const reserving: readonly string[] = RESERVING_STATUSES;
   if (ops.some((o) => o.type === "refund" && reserving.includes(o.status))) {
     next.push("a refund request is already open: a Manager decides it on the Approvals page");
-  } else if (refundRefusal(order.id, undefined) === null) {
+  } else if (actions.refund.allowed) {
     next.push(`request a refund of ${formatMoney(refundPosition(order.id).refundableMinor)} (ask: "request a refund for order ${order.id}")`);
   }
-  if (order.status === "cancelled" && order.upstreamStatus === "processing" && cancelBlocker(order, "reconcile") === null) {
-    next.push("push the cancel upstream from the order page (a refund needs upstream to agree)");
-  }
-  if (cancelBlocker(order) === null) next.push("cancel the order from the order page");
+  if (actions.reconcile.allowed) next.push("push the cancel upstream from the order page (a refund needs upstream to agree)");
+  if (actions.cancel.allowed) next.push("cancel the order from the order page");
   if (payment?.status === "failed" && ["shipped", "delivered"].includes(order.status) && ticketCount === 0) next.push("open a support ticket for the unpaid order");
   if (shipmentStatus === "delayed") next.push("the shipment is delayed: check the workflow runs above");
   return (next.length ? next : ["nothing to do right now"]).map((n) => ({ text: `Next: ${n}` }));

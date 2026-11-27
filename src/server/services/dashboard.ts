@@ -132,7 +132,7 @@ export interface EventRow {
 }
 
 // Stored webhook events, plus rejected ones (bad secret: never stored as events, only audited).
-// ponytail: rejected rows come from audit_log; give them their own table if they need payload/filters by type.
+// NOTE: rejected rows come from audit_log; give them their own table if they need payload/filters by type.
 export function listWebhookEvents(q: { status?: string; type?: string; limit?: number }): EventRow[] {
   const db = getDb();
   const limit = q.limit ?? 100;
