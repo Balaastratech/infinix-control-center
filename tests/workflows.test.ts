@@ -128,7 +128,7 @@ describe("Delayed high-value shipment -> create_ticket", () => {
     await send(delayed("NC-1006"));
     expect(api.posts).toBe(0);
     expect(runs(DELAYED_RULE)).toEqual([
-      expect.objectContaining({ matched: false, outcome: "skipped", result: "amount_minor 325000 is not gt 500000" }),
+      expect.objectContaining({ matched: false, outcome: "skipped", result: "Order amount ₹3,250.00 is not more than ₹5,000.00" }),
     ]);
   });
 
@@ -149,7 +149,7 @@ describe("Delayed high-value shipment -> create_ticket", () => {
     expect(api.posts).toBe(1); // no blind retry: the check-first GET failed too
     const [run] = runs(DELAYED_RULE);
     expect(run).toMatchObject({ matched: true, outcome: "failed" });
-    expect(run.error).toMatch(/network error.*could not verify whether the ticket exists/);
+    expect(run.error).toMatch(/Commerce API is unreachable.*could not verify whether the ticket exists/);
     expect(db.select().from(tickets).all()).toHaveLength(0);
   });
 
@@ -168,6 +168,28 @@ describe("Delayed high-value shipment -> create_ticket", () => {
     await send(delayed("NC-1016"));
     expect(api.posts).toBe(0);
     expect(runs(DELAYED_RULE)).toHaveLength(0);
+  });
+});
+
+describe("README webhook examples", () => {
+  it("evt-001 (NC-1001, Rs 1,375) is skipped; the NC-1036 example creates a ticket", async () => {
+    const api = fakeTickets();
+    await send({ event_id: "evt-001", type: "shipment.updated", occurred_at: "2026-11-22T10:00:00Z", order_id: "NC-1001", data: { status: "delayed" } });
+    expect(runs(DELAYED_RULE)[0]).toMatchObject({ outcome: "skipped", result: "Order amount ₹1,375.00 is not more than ₹5,000.00" });
+    await send({ event_id: "evt-demo-1036", type: "shipment.updated", occurred_at: "2026-11-23T10:00:00Z", order_id: "NC-1036", data: { status: "delayed" } });
+    expect(runs(DELAYED_RULE).find((r) => r.orderId === "NC-1036")).toMatchObject({ matched: true, outcome: "succeeded" });
+    expect(api.posts).toBe(1);
+  });
+});
+
+describe("editing a disabled workflow", () => {
+  it("disable, then edit the name: it stays disabled", async () => {
+    const id = wf(DELAYED_RULE).id;
+    await call(patchRoute, { as: MANAGER, method: "PATCH", id, body: { enabled: false } });
+    const res = await call(patchRoute, { as: MANAGER, method: "PATCH", id, body: { name: "Renamed rule" } });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ name: "Renamed rule", enabled: false });
+    expect(db.select().from(workflows).where(eq(workflows.id, id)).get()!.enabled).toBe(false);
   });
 });
 

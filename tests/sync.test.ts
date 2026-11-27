@@ -67,12 +67,12 @@ describe("sync", () => {
     expect(count(payments)).toBe(0);
     const run = db.select().from(syncRuns).where(eq(syncRuns.service, "payments")).get()!;
     expect(run.status).toBe("failed");
-    expect(run.error).toMatch(/network error/);
+    expect(run.error).toMatch(/API is unreachable/);
 
     const body = await (await health()).json();
     const byService = Object.fromEntries(body.services.map((s: { service: string }) => [s.service, s]));
     expect(byService.payments).toMatchObject({ status: "down", lastSyncStatus: "failed" });
-    expect(byService.payments.lastError).toMatch(/network error/);
+    expect(byService.payments.lastError).toMatch(/Payment API is unreachable/);
     expect(byService.commerce).toMatchObject({ status: "ok", lastSyncStatus: "ok" });
     expect(byService.commerce.lastSyncAt).toBeTruthy();
   });

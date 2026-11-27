@@ -150,6 +150,26 @@ describe("assistant: actions are proposals only", () => {
     expect(textOf((await ask("refunds waiting for approval")).body)).toContain("NC-1002");
   });
 
+  it("refund 500 rupees on NC-1002 proposes Rs 500, not the full amount", async () => {
+    for (const text of ["refund 500 rupees on NC-1002", "refund 500 for NC-1002"]) {
+      const card = (await ask(text)).body.answer.blocks.find((b: { kind: string }) => b.kind === "proposal");
+      expect(card).toMatchObject({ action: "refund", orderId: "NC-1002", amountMinor: 50000, maxAmountMinor: 175000 });
+    }
+  });
+
+  it("a reopened conversation shows a confirmed proposal as done (no second Confirm); unconfirmed stays open", async () => {
+    const r = await ask("refund 500 for NC-1002");
+    const id = r.body.conversationId as string;
+    const reopen = async () =>
+      (await json(await getRoute(await req("GET", `/x/${id}`, "operator@nova.test", DEV_A), ctx(id)))).body.messages
+        .flatMap((m: { blocks: { kind: string }[] }) => m.blocks)
+        .find((b: { kind: string }) => b.kind === "proposal");
+    expect((await reopen()).done).toBeUndefined();
+
+    await refundRoute(await req("POST", "/api/orders/NC-1002/refund-requests", "operator@nova.test", DEV_A, { amount_minor: 50000 }), ctx("NC-1002") as never);
+    expect((await reopen()).done).toMatch(/^Done/);
+  });
+
   it("a Viewer gets no card, nothing is created, and the denied tool call is audited", async () => {
     const r = await ask("request a refund for order NC-1002", "viewer@nova.test");
     expect(r.body.answer.text).toContain("Your role (viewer) cannot request refunds");

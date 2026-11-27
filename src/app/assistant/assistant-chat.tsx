@@ -16,7 +16,7 @@ interface Item {
 type Block =
   | { kind: "table"; title: string; columns: string[]; rows: Cell[][]; more?: Item }
   | { kind: "list"; title: string; items: Item[] }
-  | { kind: "proposal"; action: "cancel" | "refund" | "ticket"; orderId: string; amountMinor?: number; maxAmountMinor?: number; reason?: string; label: string; note: string };
+  | { kind: "proposal"; action: "cancel" | "refund" | "ticket"; orderId: string; amountMinor?: number; maxAmountMinor?: number; reason?: string; label: string; note: string; done?: string };
 interface Message {
   id: number | string;
   role: "user" | "assistant";
@@ -247,7 +247,7 @@ function BlockView({ b }: { b: Block }) {
 function Proposal({ p }: { p: Extract<Block, { kind: "proposal" }> }) {
   const [amount, setAmount] = useState(p.amountMinor ? (p.amountMinor / 100).toFixed(2) : "");
   const [reason, setReason] = useState(p.reason ?? "");
-  const [state, setState] = useState<{ busy?: boolean; done?: string; error?: string }>({});
+  const [state, setState] = useState<{ busy?: boolean; done?: string; error?: string }>(p.done ? { done: p.done } : {});
 
   async function confirm() {
     let url = `/api/orders/${encodeURIComponent(p.orderId)}/`;

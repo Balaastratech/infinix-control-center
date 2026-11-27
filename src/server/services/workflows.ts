@@ -17,6 +17,8 @@ import {
 } from "@/server/db/schema";
 import seed from "@/server/db/seed-workflows.json";
 import { renderReason } from "@/lib/ticket-template";
+import { formatMoney } from "@/lib/format";
+import { FIELD_LABELS, statusLabel } from "@/lib/labels";
 import { audit, type Actor } from "./audit";
 import { requestRefund } from "./refunds";
 import { submitTicket } from "./tickets";
@@ -41,14 +43,14 @@ const conditionSchema = z
   .superRefine((c, ctx) => {
     if (c.field === "amount_minor") {
       if (!Number.isSafeInteger(c.value) || (c.value as number) < 0) {
-        ctx.addIssue({ code: "custom", path: ["value"], message: "amount_minor needs a whole number of paise >= 0" });
+        ctx.addIssue({ code: "custom", path: ["value"], message: "Order amount must be ₹0.00 or more, with at most 2 decimals" });
       }
       return;
     }
-    if (c.op !== "eq" && c.op !== "neq") ctx.addIssue({ code: "custom", path: ["op"], message: `${c.field} supports eq and neq only` });
+    if (c.op !== "eq" && c.op !== "neq") ctx.addIssue({ code: "custom", path: ["op"], message: `${FIELD_LABELS[c.field]} can only be compared with "is" or "is not"` });
     const allowed: readonly string[] = STATUS_VALUES[c.field];
     if (typeof c.value !== "string" || !allowed.includes(c.value)) {
-      ctx.addIssue({ code: "custom", path: ["value"], message: `${c.field} must be one of: ${allowed.join(", ")}` });
+      ctx.addIssue({ code: "custom", path: ["value"], message: `${FIELD_LABELS[c.field]} must be one of: ${allowed.map(statusLabel).join(", ")}` });
     }
   });
 export type Condition = z.infer<typeof conditionSchema>;
@@ -59,7 +61,7 @@ const reasonSchema = z
   .min(1)
   .max(500)
   .refine((r) => [...r.matchAll(/\{(\w*)\}/g)].every((m) => (PLACEHOLDERS as readonly string[]).includes(m[1])), {
-    message: `unknown placeholder; allowed: ${PLACEHOLDERS.map((p) => `{${p}}`).join(" ")}`,
+    message: `Unknown placeholder; allowed: ${PLACEHOLDERS.map((p) => `{${p}}`).join(" ")}`,
   });
 
 const actionSchema = z.discriminatedUnion("type", [
@@ -76,7 +78,8 @@ export const workflowSchema = z.object({
   enabled: z.boolean().default(true),
 });
 export type WorkflowInput = z.infer<typeof workflowSchema>;
-export const workflowPatchSchema = workflowSchema.partial();
+// enabled re-declared without its default: an edit that omits it must keep the stored value.
+export const workflowPatchSchema = workflowSchema.extend({ enabled: z.boolean() }).partial();
 
 type Row = typeof workflows.$inferSelect;
 export interface Workflow extends WorkflowInput {
@@ -189,12 +192,23 @@ const COMPARE: Record<(typeof OPS)[number], (a: number | string, b: number | str
   lte: (a, b) => a <= b,
 };
 
+const NOT_OP: Record<(typeof OPS)[number], string> = {
+  eq: "is not",
+  neq: "is",
+  gt: "is not more than",
+  gte: "is less than",
+  lt: "is not less than",
+  lte: "is more than",
+};
+
 // The first condition that fails, as a readable reason, or null when all hold.
 export function failedCondition(conditions: Condition[], facts: Facts): string | null {
   for (const c of conditions) {
     const actual = facts[c.field];
-    if (actual === null) return `${c.field} is missing`;
-    if (!COMPARE[c.op](actual, c.value)) return `${c.field} ${actual} is not ${c.op} ${c.value}`;
+    const field = FIELD_LABELS[c.field] ?? c.field;
+    if (actual === null) return `${field} is missing`;
+    const show = (v: number | string) => (c.field === "amount_minor" ? formatMoney(Number(v)) : statusLabel(String(v)));
+    if (!COMPARE[c.op](actual, c.value)) return `${field} ${show(actual)} ${NOT_OP[c.op]} ${show(c.value)}`;
   }
   return null;
 }

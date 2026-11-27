@@ -19,6 +19,7 @@ export function orderPath(prefix: string, id: unknown): string | null {
   return isValidId(id) ? prefix + encodeURIComponent(id) : null;
 }
 
+const SERVICE_NAMES: Record<string, string> = { commerce: "Commerce API", payments: "Payment API", shipping: "Shipping API" };
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // retry=false for POSTs with no idempotency key (refunds): the caller checks upstream before any second attempt.
@@ -47,9 +48,10 @@ async function attemptOnce<T>(method: string, path: string, body?: Record<string
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch (e) {
-    const err = e as Error;
-    const reason = err.name === "TimeoutError" ? "timeout" : (err.cause as Error | undefined)?.message || err.message;
-    return { ok: false, status: null, error: `network error: ${reason}` };
+    // Staff read this text: name the service, never the socket error (ECONNREFUSED, host:port).
+    const service = SERVICE_NAMES[path.split("/")[1]] ?? "External service";
+    const timedOut = (e as Error).name === "TimeoutError";
+    return { ok: false, status: null, error: timedOut ? `${service} did not answer in time` : `${service} is unreachable` };
   }
   let data: unknown;
   try {

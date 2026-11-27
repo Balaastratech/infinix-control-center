@@ -66,6 +66,19 @@ curl -s -X POST http://localhost:3000/api/webhooks -H "Content-Type: application
 
 Sending the same event again returns `{"status":"duplicate"}` and changes nothing. A missing or wrong secret gets a 401, and the attempt is logged.
 
+What to expect:
+- **evt-001 is skipped by design.** NC-1001 is ₹1,375.00, so the "Delayed high-value shipment" rule (order amount more than ₹5,000.00) does not match. The shipment is marked delayed, and the workflow run shows as skipped with the reason "Order amount ₹1,375.00 is not more than ₹5,000.00".
+- evt-002 marks NC-1007's payment as failed locally ("local ahead" until upstream agrees). No refund can be approved for it until that is reconciled.
+- evt-003 cancels NC-1004 locally and the "Refund cancelled paid orders" rule creates a pending refund approval. Nothing goes to the Payment API until a Manager approves.
+
+To see the delayed rule fire, send a delayed event for a high-value order. NC-1036 is ₹14,500.00 and its shipment was last updated 2026-11-21, so this newer event applies and creates a support ticket:
+
+```bash
+curl -s -X POST http://localhost:3000/api/webhooks -H "Content-Type: application/json" -H "X-Webhook-Secret: $SECRET"   -d '{"event_id":"evt-demo-1036","type":"shipment.updated","occurred_at":"2026-11-23T10:00:00Z","order_id":"NC-1036","data":{"status":"delayed"}}'
+```
+
+The run appears under Workflows (run history) and on the dashboard, and the ticket appears on the order page.
+
 ## API
 
 All routes are under `/api` and return JSON. Money is integer **paise** (₹5,000 = `500000`); times are UTC ISO-8601.
@@ -80,6 +93,16 @@ All routes are under `/api` and return JSON. Money is integer **paise** (₹5,00
 - **Roles column:** V = Viewer, O = Operator, M = Manager.
 
 ### Auth
+
+Logging in from a script (every POST needs the `Origin` header, see above). The cookie jar keeps the session for later calls:
+
+```bash
+BASE=http://localhost:3000
+curl -s -c cookies.txt -X POST $BASE/api/auth/login -H "Content-Type: application/json" -H "Origin: $BASE"   -d '{"email":"operator@nova.test","password":"demo1234"}'
+curl -s -b cookies.txt -X POST $BASE/api/sync -H "Origin: $BASE"
+```
+
+Successful logins, failed logins and logouts are all written to the audit log.
 
 | Method | Path | Role | Body | Replies |
 |---|---|---|---|---|

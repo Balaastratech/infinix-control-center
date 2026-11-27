@@ -36,7 +36,7 @@ export async function submitTicket(orderId: string, reason: string, actor: Actor
       await sleep(BACKOFF_MS[attempt - 2]);
       const existing = await findLostTicket(orderId, reason);
       if (existing === "unavailable") {
-        const error = `${lastError}; could not verify whether the ticket exists (Commerce API unreachable)`;
+        const error = `${lastError}; could not verify whether the ticket exists`;
         log("failed", { error });
         return { ok: false, code: "upstream", reason: error };
       }

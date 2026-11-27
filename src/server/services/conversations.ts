@@ -2,9 +2,9 @@
 // to the owner (user id + browser device id). Not yours = null -> the route answers 404, so ids never leak.
 // docs/assistant-design.md sections 1-2.
 import crypto from "node:crypto";
-import { and, asc, count, desc, eq, lt } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, lt } from "drizzle-orm";
 import { getDb } from "@/server/db";
-import { assistantConversations, assistantMessages, assistantToolCalls } from "@/server/db/schema";
+import { assistantConversations, assistantMessages, assistantToolCalls, auditLog } from "@/server/db/schema";
 import type { AssistantContext } from "./assistant-parser";
 import type { Block } from "./assistant-tools";
 
@@ -98,14 +98,42 @@ export function getConversation(owner: Owner, id: string): { id: string; title: 
   const conv = db.select().from(assistantConversations).where(mine(owner, id)).get();
   if (!conv) return null;
   const rows = db.select().from(assistantMessages).where(eq(assistantMessages.conversationId, conv.id)).orderBy(asc(assistantMessages.id)).all();
+  const markDone = confirmedProposals(owner.userId, rows[0]?.createdAt);
   return {
     id: conv.id,
     title: conv.title,
     messages: rows.map((m) => {
       const extra = m.blocks ? (JSON.parse(m.blocks) as { blocks: Block[]; suggestions?: string[]; notice?: string }) : { blocks: [] };
-      return { id: m.id, role: m.role, text: m.text, mode: m.mode, intent: m.intent, understood: m.understood, createdAt: m.createdAt, ...extra };
+      return { id: m.id, role: m.role, text: m.text, mode: m.mode, intent: m.intent, understood: m.understood, createdAt: m.createdAt, ...extra, blocks: markDone(extra.blocks, m.createdAt) };
     }),
   };
+}
+
+// A proposal already confirmed (this user did the action on that order after the proposal was shown) comes back with
+// `done`, so a reopened conversation shows "Done" instead of a second Confirm. Derived from the audit log: each
+// successful action marks at most one proposal.
+const PROPOSAL_AUDIT = { cancel: ["order.cancel", "ok"], refund: ["refund.request", "pending_approval"], ticket: ["ticket.create", "ok"] } as const;
+const DONE_TEXT = { cancel: "Done: order cancelled.", refund: "Done: refund request created; it waits for Manager approval.", ticket: "Done: ticket created." } as const;
+
+function confirmedProposals(userId: number, since: string | undefined) {
+  const rows = since
+    ? getDb()
+        .select({ id: auditLog.id, at: auditLog.at, action: auditLog.action, target: auditLog.target, outcome: auditLog.outcome })
+        .from(auditLog)
+        .where(and(eq(auditLog.userId, userId), gte(auditLog.at, since)))
+        .orderBy(asc(auditLog.id))
+        .all()
+    : [];
+  const used = new Set<number>();
+  return (blocks: Block[], shownAt: string): Block[] =>
+    blocks.map((b) => {
+      if (b.kind !== "proposal") return b;
+      const [action, outcome] = PROPOSAL_AUDIT[b.action];
+      const hit = rows.find((r) => !used.has(r.id) && r.at >= shownAt && r.action === action && r.outcome === outcome && r.target === b.orderId);
+      if (!hit) return b;
+      used.add(hit.id);
+      return { ...b, done: DONE_TEXT[b.action] };
+    });
 }
 
 export function renameConversation(owner: Owner, id: string, title: string): boolean {

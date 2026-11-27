@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { formatIst } from "@/lib/format";
-import { auditActionLabel, auditSummary, auditTargetLabel } from "@/lib/labels";
+import { auditActionLabel, auditDetailEntries, auditSummary, auditTargetLabel } from "@/lib/labels";
 import { Alert, Badge, Empty, FilterSelect, Skeleton, TableWrap } from "../ui";
 
 interface Entry {
@@ -106,7 +106,14 @@ export function AuditLog() {
                     {e.detail && (
                       <details>
                         <summary>details</summary>
-                        <pre>{e.detail}</pre>
+                        <dl className="kv">
+                          {auditDetailEntries(e.detail).map(([k, v], i) => (
+                            <div key={i}>
+                              <dt>{k}</dt>
+                              <dd>{v}</dd>
+                            </div>
+                          ))}
+                        </dl>
                       </details>
                     )}
                   </td>

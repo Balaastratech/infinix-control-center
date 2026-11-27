@@ -124,7 +124,7 @@ describe("rule: approve re-reads upstream and re-checks before the Payment API i
   it("upstream captured amount smaller than the request: refused, no refund call", async () => {
     const posts = upstream({ status: "captured", amount_minor: 100000 });
     expect(await approveRefund(pending(), MGR)).toMatchObject({ status: "failed" });
-    expect(db.select().from(operations).get()!.error).toContain("exceeds the refundable 100000 upstream");
+    expect(db.select().from(operations).get()!.error).toContain("exceeds the refundable ₹1,000.00 upstream");
     expect(posts.n).toBe(0);
   });
 });
@@ -161,6 +161,6 @@ describe("rule: 5 s timeout per attempt", () => {
   it("a reply that never comes ends as a timeout error", async () => {
     server.use(http.get(`${BASE}/commerce/customers`, () => new Promise<Response>(() => {})));
     const res = await request("GET", "/commerce/customers", undefined, false);
-    expect(res).toMatchObject({ ok: false, error: "network error: timeout" });
+    expect(res).toMatchObject({ ok: false, error: "Commerce API did not answer in time" });
   }, 15000);
 });

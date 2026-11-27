@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { formatIst, formatMoney } from "@/lib/format";
-import { auditActionLabel, auditTargetLabel } from "@/lib/labels";
+import { auditActionLabel, auditTargetLabel, runResultLabel, statusLabel } from "@/lib/labels";
 import { unpaidReason } from "@/lib/ticket-template";
 import { CreateTicketButton } from "./create-ticket-button";
 import type { Dashboard } from "@/server/services/dashboard";
@@ -341,7 +341,7 @@ export function DashboardView({ canOperate }: { canOperate: boolean }) {
                       <Badge status={x.outcome} />
                     </td>
                     <td className={x.outcome === "failed" ? "error" : undefined}>
-                      <small>{x.error ?? x.result ?? "-"}</small>
+                      <small>{runResultLabel(x.result, x.error)}</small>
                     </td>
                   </tr>
                 ))}
@@ -374,7 +374,7 @@ export function DashboardView({ canOperate }: { canOperate: boolean }) {
                         <OrderLink id={o.orderId} />
                         <small>{formatIst(o.updatedAt)}</small>
                       </td>
-                      <td>{o.type}</td>
+                      <td>{statusLabel(o.type)}</td>
                       <td className="num">{o.amountMinor === null ? "-" : formatMoney(o.amountMinor)}</td>
                       <td>
                         <Badge status={o.status} />

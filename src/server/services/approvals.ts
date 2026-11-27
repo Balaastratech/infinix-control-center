@@ -7,7 +7,8 @@ import { alias } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 import { orderPath, request, type ApiResult } from "@/server/clients/mock";
 import { getDb } from "@/server/db";
-import { approvals, operations, refunds, users } from "@/server/db/schema";
+import { approvals, operations, payments, refunds, users } from "@/server/db/schema";
+import { formatMoney } from "@/lib/format";
 import { audit, type Actor } from "./audit";
 import { recordHealth, recordNetworkFailure } from "./health";
 import { RESERVING_STATUSES } from "./refunds";
@@ -173,8 +174,14 @@ async function execute(approvalId: number, operationId: number, actor: Actor, is
   if (isRetry) {
     // No idempotency key upstream: a refund of ours may already exist (e.g. timeout after the mock processed it).
     const existing = await findExistingRefund(op.orderId, amount, operationId);
-    if (existing === "unavailable") return unsent("could not check existing refunds (Payment API unreachable)");
+    if (existing === "unavailable") return unsent("could not check existing refunds (Payment API is unreachable)");
     if (existing) return end("succeeded", null, existing);
+  }
+
+  // Local ahead of upstream (e.g. a payment.failed webhook the mock doesn't know): reconcile first, never refund.
+  const localPay = getDb().select({ status: payments.status }).from(payments).where(eq(payments.orderId, op.orderId)).get();
+  if (localPay?.status !== "captured") {
+    return end("failed", `local payment is ${localPay?.status ?? "missing"}, not captured; reconcile with the Payment API first`);
   }
 
   const checked = await recheckUpstream(op.orderId, amount, operationId);
@@ -183,7 +190,7 @@ async function execute(approvalId: number, operationId: number, actor: Actor, is
 
   const res = await request<unknown>("POST", "/payments/refunds", { order_id: op.orderId, amount_minor: amount }, false); // never blindly retried
   recordNetworkFailure("payments", res);
-  if (!res.ok) return unreachable(res) ? unsent(`Payment API unreachable: ${res.error}`) : end("failed", res.error);
+  if (!res.ok) return unreachable(res) ? unsent("Payment API is unreachable") : end("failed", res.error);
 
   const reply = refundRow.safeParse(res.data);
   if (!reply.success || reply.data.order_id !== op.orderId || reply.data.amount_minor !== amount) {
@@ -243,8 +250,8 @@ async function recheckUpstream(orderId: string, amount: number, operationId: num
   const [o, p] = await Promise.all([request<unknown>("GET", orderUrl), request<unknown>("GET", payUrl)]);
   recordNetworkFailure("commerce", o);
   recordNetworkFailure("payments", p);
-  if (!o.ok && unreachable(o)) return { kind: "unreachable", reason: `Commerce API unreachable: ${o.error}` };
-  if (!p.ok && unreachable(p)) return { kind: "unreachable", reason: `Payment API unreachable: ${p.error}` };
+  if (!o.ok && unreachable(o)) return { kind: "unreachable", reason: "Commerce API is unreachable" };
+  if (!p.ok && unreachable(p)) return { kind: "unreachable", reason: "Payment API is unreachable" };
   if (!o.ok) return { kind: "refused", reason: `upstream order lookup failed: ${o.error}` };
   if (!p.ok) return { kind: "refused", reason: `upstream payment lookup failed: ${p.error}` };
   const order = liveOrder.safeParse(o.data);
@@ -277,6 +284,6 @@ async function recheckUpstream(orderId: string, amount: number, operationId: num
     )
     .get()!.n;
   const cap = Math.max(0, pay.data.amount_minor - refunded - reservedByOthers);
-  if (amount > cap) return { kind: "refused", reason: `amount ${amount} exceeds the refundable ${cap} upstream` };
+  if (amount > cap) return { kind: "refused", reason: `Amount ${formatMoney(amount)} exceeds the refundable ${formatMoney(cap)} upstream` };
   return { kind: "ok" };
 }

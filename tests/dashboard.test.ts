@@ -8,7 +8,7 @@ import { POST as bulkRoute } from "@/app/api/refund-requests/bulk/route";
 import { POST as syncRoute } from "@/app/api/sync/route";
 import { createSessionCookie } from "@/server/auth/session";
 import type { Db } from "@/server/db";
-import { users } from "@/server/db/schema";
+import { operations, refunds, users } from "@/server/db/schema";
 import type { Dashboard } from "@/server/services/dashboard";
 import { syncAll } from "@/server/services/sync";
 import { receiveWebhook } from "@/server/services/webhooks";
@@ -68,6 +68,26 @@ describe("GET /api/dashboard", () => {
     expect(d.pendingApprovals.count).toBe(11);
     expect(d.recentOperations).toHaveLength(10);
     expect(d.recentAudit[0]).toMatchObject({ action: "refund.bulk_request", actorLabel: "operator@nova.test" });
+  });
+
+  it("NC-1003 partly refunded (Rs 1,000 of Rs 2,125): still listed owing Rs 1,125; bulk requests Rs 1,125", async () => {
+    await syncAll();
+    db.insert(refunds).values({ id: "R-P1", orderId: "NC-1003", amountMinor: 100000, currency: "INR", status: "succeeded" }).run();
+    const d = await dashboard();
+    expect(d.moneyAtRisk.owedRefunds.orders.find((o) => o.orderId === "NC-1003")).toMatchObject({ amountMinor: 112500 });
+    expect(d.moneyAtRisk.owedRefunds.totalMinor).toBe(13775000 - 100000);
+
+    await call(bulkRoute, "/api/refund-requests/bulk", "POST", "operator@nova.test");
+    const op = db.select().from(operations).where(eq(operations.orderId, "NC-1003")).get()!;
+    expect(op).toMatchObject({ type: "refund", status: "pending_approval", amountMinor: 112500 });
+  });
+
+  it("a fully refunded cancelled order leaves the list", async () => {
+    await syncAll();
+    db.insert(refunds).values({ id: "R-P2", orderId: "NC-1003", amountMinor: 212500, currency: "INR", status: "succeeded" }).run();
+    const d = await dashboard();
+    expect(d.moneyAtRisk.owedRefunds.orders.map((o) => o.orderId)).not.toContain("NC-1003");
+    expect(d.moneyAtRisk.owedRefunds.count).toBe(10);
   });
 
   it("works with every upstream call failing: local data, health shows each service down", async () => {

@@ -30,6 +30,7 @@ export async function POST(req: Request) {
     return jsonError(401, "invalid email or password");
   }
   recordLoginSuccess(ip, body.email);
+  audit({ userId: user.id, actorLabel: user.email, role: user.role, action: "auth.login", target: user.email, outcome: "ok" });
   return Response.json(
     { user: { id: user.id, email: user.email, role: user.role } },
     { headers: { "Set-Cookie": await createSessionCookie(user.id) } },

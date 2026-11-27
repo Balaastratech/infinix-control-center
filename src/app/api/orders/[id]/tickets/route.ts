@@ -17,5 +17,5 @@ export async function POST(req: Request, ctx: RouteContext<"/api/orders/[id]/tic
   if (body instanceof Response) return body;
   const r = await submitTicket(id, body.reason, userActor(auth), { auditAction: "ticket.create" });
   if (r.ok) return Response.json(r, { status: 201 });
-  return r.code === "not_found" ? jsonError(404, r.reason) : jsonError(502, `Commerce API: ${r.reason}`);
+  return r.code === "not_found" ? jsonError(404, r.reason) : jsonError(502, r.reason);
 }

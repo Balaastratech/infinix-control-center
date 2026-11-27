@@ -1193,3 +1193,32 @@ button[aria-busy="true"]::before {
   align-items: center;
   gap: var(--s3);
 }
+
+/* Key/value list (audit details) */
+.kv {
+  display: grid;
+  gap: 2px;
+  margin: 6px 0 0;
+  font-size: var(--text-xs);
+}
+.kv > div {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) 1fr;
+  gap: 8px;
+}
+.kv dt {
+  color: var(--text-3);
+}
+.kv dd {
+  margin: 0;
+  color: var(--text-2);
+}
+
+/* Route-level loading / error / not-found */
+.page-state {
+  display: grid;
+  gap: 16px;
+  max-width: 960px;
+  margin: 32px auto;
+  padding: 0 16px;
+}

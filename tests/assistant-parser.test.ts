@@ -41,6 +41,9 @@ const TABLE: [string, string, Record<string, unknown>][] = [
   ["cancel NC-1001", "propose_cancel", { order_id: "NC-1001" }],
   ["request a refund for order NC-1002", "propose_refund", { order_id: "NC-1002" }],
   ["refund Rs 500 on NC-1002", "propose_refund", { order_id: "NC-1002", amount_minor: 50000 }],
+  ["refund 500 rupees on NC-1002", "propose_refund", { order_id: "NC-1002", amount_minor: 50000 }],
+  ["refund 500 for NC-1002", "propose_refund", { order_id: "NC-1002", amount_minor: 50000 }],
+  ["refund 1,250.50 rs for NC-1002", "propose_refund", { order_id: "NC-1002", amount_minor: 125050 }],
   ["create a ticket for NC-1007 because customer never paid", "propose_ticket", { order_id: "NC-1007", reason: "customer never paid" }],
 ];
 

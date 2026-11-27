@@ -98,7 +98,7 @@ describe("Create support ticket (POST /api/orders/[id]/tickets)", () => {
     fakeTickets("down");
     const res = await createTicket("manager@nova.test");
     expect(res.status).toBe(502);
-    expect(res.body.error).toMatch(/^Commerce API: network error.*could not verify whether the ticket exists/);
+    expect(res.body.error).toMatch(/^Commerce API is unreachable; could not verify whether the ticket exists/);
     expect(db.select().from(tickets).all()).toHaveLength(0);
     expect(db.select().from(auditLog).where(eq(auditLog.action, "ticket.create")).get()).toMatchObject({ outcome: "failed" });
   }, 10_000);

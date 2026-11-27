@@ -72,6 +72,22 @@ export function amountToPaise(digits: string, unit?: string): number | null {
   return Number.isSafeInteger(paise) && paise > 0 ? paise : null;
 }
 
+// The amount in a refund request: "Rs 500", "500 rupees", "500 rs", or a bare number right after "refund"
+// ("refund 500 for NC-1002"). The order id is already removed from the text. null = the full amount.
+const NUM = String.raw`(\d[\d,]*(?:\.\d{1,2})?)\s*(k|lakhs?|l)?`;
+const REFUND_AMOUNT = [
+  new RegExp(String.raw`(?:rs\.?|₹|inr)\s*${NUM}\b`, "i"),
+  new RegExp(String.raw`${NUM}\s*(?:rupees?|rs\.?|inr)(?![a-z])`, "i"),
+  new RegExp(String.raw`\brefund\s+(?:of\s+)?${NUM}\b`, "i"),
+];
+function refundAmount(text: string): number | null {
+  for (const re of REFUND_AMOUNT) {
+    const m = re.exec(text);
+    if (m) return amountToPaise(m[1], m[2]);
+  }
+  return null;
+}
+
 const AMT = String.raw`(?:rs\.?|₹|inr)?\s*(\d[\d,]*(?:\.\d{1,2})?)\s*(k|lakhs?|lacs?|l|crore|cr)?\b`;
 
 function amounts(t: string): Pick<OrderFilters, "minAmountMinor" | "maxAmountMinor"> {
@@ -196,8 +212,7 @@ export function parse(raw: string, last: AssistantContext | null, customers: Cus
   if (orderId && /\bcancel\b/.test(t) && !/\bwho\b/.test(t)) return tool("propose_cancel", { order_id: orderId }, [`cancel order ${orderId} (needs your confirmation)`]);
   if (orderId && /\b(refund)\b/.test(t) && !/\bwho\b|\bstatus\b|\binvestigate\b/.test(t)) {
     const rest = text.replace(oid![0], " ");
-    const amt = new RegExp(String.raw`(?:of|for|amount)?\s*(?:rs\.?|₹|inr)\s*(\d[\d,]*(?:\.\d{1,2})?)\s*(k|lakhs?|l)?\b`, "i").exec(rest);
-    const amountMinor = amt ? amountToPaise(amt[1], amt[2]) : null;
+    const amountMinor = refundAmount(rest);
     return tool("propose_refund", amountMinor ? { order_id: orderId, amount_minor: amountMinor } : { order_id: orderId }, [
       `refund for ${orderId}`,
       amountMinor ? formatMoney(amountMinor) : "full refundable amount",

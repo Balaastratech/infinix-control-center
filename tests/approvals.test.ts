@@ -10,7 +10,7 @@ import { GET as healthRoute } from "@/app/api/health/route";
 import { POST as refundRoute } from "@/app/api/orders/[id]/refund-requests/route";
 import { createSessionCookie } from "@/server/auth/session";
 import type { Db } from "@/server/db";
-import { approvals, auditLog, operations, orders, refunds, users } from "@/server/db/schema";
+import { approvals, auditLog, operations, orders, payments, refunds, users } from "@/server/db/schema";
 import { requestRefund } from "@/server/services/refunds";
 import { syncAll } from "@/server/services/sync";
 import { clearData, setupTestDb } from "./helpers/db";
@@ -169,6 +169,18 @@ describe("approve", () => {
     const res = await approve(id, MANAGER);
     expect(res.body.status).toBe("failed");
     expect(opOf(id).error).toBe("upstream says processing; push cancel upstream first");
+    expect(upstream.posts).toBe(0);
+  });
+
+  it("local payment failed (payment.failed webhook) but upstream captured: refused, no refund call", async () => {
+    const upstream = fakeUpstream();
+    db.update(orders).set({ status: "cancelled" }).where(eq(orders.id, "NC-1002")).run();
+    const id = await requestAs(OPERATOR, "NC-1002");
+    expect(id).toBeTypeOf("number");
+    db.update(payments).set({ status: "failed", localEventAt: "2026-11-22T10:10:00Z" }).where(eq(payments.orderId, "NC-1002")).run();
+    const res = await approve(id, MANAGER);
+    expect(res.body.status).toBe("failed");
+    expect(opOf(id).error).toMatch(/local payment is failed.*reconcile/);
     expect(upstream.posts).toBe(0);
   });
 

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { formatIst, formatMoney, parseRupees } from "@/lib/format";
-import { ACTION_LABELS, conditionLabel, FIELD_LABELS, OP_LABELS, SAMPLE_ORDER, statusLabel, TRIGGER_LABELS } from "@/lib/labels";
+import { ACTION_LABELS, conditionLabel, FIELD_LABELS, issueFieldLabel, OP_LABELS, runResultLabel, SAMPLE_ORDER, statusLabel, TRIGGER_LABELS } from "@/lib/labels";
 import { renderReason } from "@/lib/ticket-template";
 import { Alert, Badge, Card, Empty, Skeleton, SkeletonCard, TableWrap } from "../ui";
 
@@ -120,7 +120,7 @@ async function send(url: string, method: string, body?: unknown) {
   });
   const b = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const issues = (b.issues as { path: unknown[]; message: string }[] | undefined)?.map((i) => `${i.path.join(".")}: ${i.message}`);
+    const issues = (b.issues as { path: unknown[]; message: string }[] | undefined)?.map((i) => `${issueFieldLabel(i.path as PropertyKey[])}: ${i.message}`);
     throw new Error([b.error ?? `HTTP ${res.status}`, ...(issues ?? [])].join(" · "));
   }
   return b;
@@ -454,7 +454,7 @@ export function WorkflowsEditor({ isManager }: { isManager: boolean }) {
                         <Badge status={r.outcome} />
                       </td>
                       <td className={r.outcome === "failed" ? "error" : undefined}>
-                        <small>{r.error ?? r.result ?? "-"}</small>
+                        <small>{runResultLabel(r.result, r.error)}</small>
                       </td>
                     </tr>
                   ))}

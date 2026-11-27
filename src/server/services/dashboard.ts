@@ -6,7 +6,6 @@ import {
   operations,
   orders,
   payments,
-  refunds,
   shipments,
   syncRuns,
   tickets,
@@ -18,33 +17,15 @@ import {
 import { listApprovals } from "./approvals";
 import { getHealth } from "./health";
 import { listOrders } from "./orders";
-import { RESERVING_STATUSES } from "./refunds";
+import { owedRefundOrders } from "./refunds";
 
 const RECENT = 10;
 
 const countBy = (rows: { k: string; n: number }[]) => Object.fromEntries(rows.map((r) => [r.k, r.n]));
 
-// Cancelled orders holding a captured payment with nothing refunded (failed refunds don't count).
+// Cancelled orders still owed money: captured minus succeeded refunds (a partial refund leaves the rest owed).
 export function owedRefunds() {
-  const rows = getDb()
-    .select({
-      orderId: orders.id,
-      amountMinor: payments.amountMinor,
-      pendingApproval: sql<number>`EXISTS (SELECT 1 FROM ${operations} o WHERE o.order_id = ${orders.id} AND o.type = 'refund'
-        AND o.status IN (${sql.join(RESERVING_STATUSES.map((s) => sql`${s}`), sql`, `)}))`,
-    })
-    .from(orders)
-    .innerJoin(payments, eq(payments.orderId, orders.id))
-    .where(
-      and(
-        eq(orders.status, "cancelled"),
-        eq(payments.status, "captured"),
-        sql`NOT EXISTS (SELECT 1 FROM ${refunds} r WHERE r.order_id = ${orders.id} AND r.status <> 'failed')`,
-      ),
-    )
-    .orderBy(orders.id)
-    .all()
-    .map((r) => ({ ...r, pendingApproval: Boolean(r.pendingApproval) }));
+  const rows = owedRefundOrders();
   return { count: rows.length, totalMinor: rows.reduce((s, r) => s + r.amountMinor, 0), orders: rows };
 }
 

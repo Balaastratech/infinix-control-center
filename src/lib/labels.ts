@@ -55,10 +55,75 @@ export const SAMPLE_ORDER = {
   facts: { amount_minor: 700000, order_status: "shipped", payment_status: "captured", shipment_status: "delayed" },
 };
 
+// A workflow run's stored result (JSON) or error, as a sentence for staff.
+export function runResultLabel(result: string | null, error: string | null): string {
+  if (error) return error;
+  if (!result) return "-";
+  let r: unknown;
+  try {
+    r = JSON.parse(result);
+  } catch {
+    return result; // skip reasons are stored as text
+  }
+  const d = (r ?? {}) as Record<string, unknown>;
+  if (typeof d.approvalId === "number") {
+    return `Refund request #${d.approvalId}${typeof d.amountMinor === "number" ? ` for ${formatMoney(d.amountMinor)}` : ""} sent for approval`;
+  }
+  if (typeof d.ticketId === "string") return `Support ticket ${d.ticketId} created`;
+  return statusLabel(String(r));
+}
+
+// Workflow form issue path -> the field's label: ["conditions", 0, "value"] -> "Condition 1 value".
+export function issueFieldLabel(path: readonly PropertyKey[]): string {
+  const [head, i, leaf] = path;
+  if (head === "conditions" && typeof i === "number") {
+    const part = { field: "field", op: "comparison", value: "value" }[String(leaf)] ?? "";
+    return `Condition ${i + 1}${part ? ` ${part}` : ""}`;
+  }
+  if (head === "conditions") return "Conditions";
+  if (head === "action") return i === "reason" ? "Ticket text" : i === "amount_minor" ? "Refund amount" : "Action";
+  return { name: "Name", trigger: "Trigger", enabled: "Enabled" }[String(head)] ?? "Workflow";
+}
+
 // ---------- audit ----------
+
+const DETAIL_KEYS: Record<string, string> = {
+  amountMinor: "Amount",
+  approvalId: "Approval",
+  operationId: "Operation",
+  externalId: "Refund id",
+  ticketId: "Ticket",
+  eventId: "Event",
+  executionId: "Workflow run",
+  httpStatus: "HTTP status",
+};
+const keyLabel = (k: string) => DETAIL_KEYS[k] ?? statusLabel(k.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase());
+const valueText = (k: string, v: unknown): string => {
+  if (v === null || v === undefined || v === "") return "-";
+  if (/Minor$/.test(k) && typeof v === "number") return formatMoney(v);
+  if (Array.isArray(v)) return v.map((x) => valueText("", x)).join("; ");
+  if (typeof v === "object") return Object.entries(v as Record<string, unknown>).map(([kk, vv]) => `${keyLabel(kk)}: ${valueText(kk, vv)}`).join(", ");
+  return String(v);
+};
+
+// The stored detail as readable label/value pairs (for the expandable row), never raw JSON.
+export function auditDetailEntries(detail: string | null): [string, string][] {
+  if (!detail) return [];
+  try {
+    const parsed: unknown = JSON.parse(detail);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return Object.entries(parsed as Record<string, unknown>).filter(([, v]) => v !== undefined && v !== null).map(([k, v]) => [keyLabel(k), valueText(k, v)]);
+    }
+    return [["Detail", valueText("", parsed)]];
+  } catch {
+    return [["Detail", detail]];
+  }
+}
 
 const AUDIT_ACTIONS: Record<string, string> = {
   sync: "Sync",
+  "auth.login": "Login",
+  "auth.logout": "Logout",
   "order.cancel": "Order cancelled",
   "order.reconcile_cancel": "Cancel pushed upstream",
   "refund.request": "Refund requested",

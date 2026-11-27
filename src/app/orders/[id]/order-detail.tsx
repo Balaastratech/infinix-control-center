@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { formatIst, formatMoney, parseRupees } from "@/lib/format";
+import { statusLabel } from "@/lib/labels";
 import { CreateTicketButton } from "../../create-ticket-button";
 import { Alert, Badge, Card, CustomerLink, Empty, Skeleton, SkeletonCard, TableWrap } from "../../ui";
 
@@ -357,6 +358,7 @@ function DataTable({ title, rows, cols, empty }: { title: string; rows: Row[]; c
     if (col === "amountMinor") return formatMoney(v as number);
     if (col === "status") return <Badge status={String(v)} />;
     if (col === "error") return <span className="error">{String(v)}</span>;
+    if (col === "type") return statusLabel(String(v)); // "shipment.updated" -> "Shipment updated", "refund" -> "Refund"
     if (/At$/.test(col)) return <span className="nowrap">{formatIst(v as string)}</span>;
     return String(v);
   };

@@ -41,7 +41,7 @@ export type Cell = string | { text: string; href: string };
 export type Block =
   | { kind: "table"; title: string; columns: string[]; rows: Cell[][]; more?: Item }
   | { kind: "list"; title: string; items: Item[] }
-  | { kind: "proposal"; action: "cancel" | "refund" | "ticket"; orderId: string; amountMinor?: number; maxAmountMinor?: number; reason?: string; label: string; note: string };
+  | { kind: "proposal"; action: "cancel" | "refund" | "ticket"; orderId: string; amountMinor?: number; maxAmountMinor?: number; reason?: string; label: string; note: string; done?: string };
 
 export interface ToolResult {
   outcome: "ok" | "invalid" | "denied" | "not_found";

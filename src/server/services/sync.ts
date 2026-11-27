@@ -2,6 +2,7 @@
 // Each service: fetch everything, validate, write in ONE transaction, record a sync_runs row and service health.
 // One service failing never stops the others. Sync itself never fires workflows; pending webhook events it unblocks do.
 import { eq, notInArray } from "drizzle-orm";
+import { SERVICE_LABELS } from "@/lib/labels";
 import { z } from "zod";
 import { request } from "@/server/clients/mock";
 import { getDb } from "@/server/db";
@@ -35,7 +36,7 @@ class SyncError extends Error {}
 
 async function fetchList<T extends z.ZodType>(path: string, schema: T): Promise<z.infer<T>[]> {
   const res = await request<unknown>("GET", path);
-  if (!res.ok) throw new SyncError(`GET ${path}: ${res.error}`);
+  if (!res.ok) throw new SyncError(res.status === null ? res.error : `${SERVICE_LABELS[path.split("/")[1]] ?? "Upstream"} replied: ${res.error}`);
   const parsed = z.array(schema).safeParse(res.data);
   if (!parsed.success) throw new SyncError(`GET ${path}: unexpected reply shape (${parsed.error.issues[0]?.message})`);
   return parsed.data;

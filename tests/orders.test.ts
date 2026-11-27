@@ -140,7 +140,7 @@ describe("POST /api/orders/[id]/cancel", () => {
     expect(calls).toHaveLength(3); // network errors are retried
     const [op] = opsFor("NC-1004");
     expect(op.status).toBe("failed");
-    expect(op.error).toMatch(/network error/);
+    expect(op.error).toMatch(/API is unreachable/);
     expect(order("NC-1004")).toMatchObject({ status: "processing", upstreamStatus: "processing", localEventAt: null });
     expect(hook).not.toHaveBeenCalled();
   });
@@ -221,7 +221,7 @@ describe("POST /api/orders/[id]/refund-requests", () => {
   it("refuses an amount over the cap (NC-1002 captured 175000)", async () => {
     const res = await refund("NC-1002", { amount_minor: 175001 });
     expect(res.status).toBe(409);
-    expect(res.body.error).toMatch(/exceeds the refundable 175000/);
+    expect(res.body.error).toMatch(/exceeds the refundable ₹1,750.00/);
   });
 
   it("defaults to the full refundable amount and creates a pending approval, no Payment API call", async () => {
@@ -244,7 +244,7 @@ describe("POST /api/orders/[id]/refund-requests", () => {
     expect((await refund("NC-1002", { amount_minor: 100000 })).status).toBe(201);
     const over = await refund("NC-1002", { amount_minor: 75001 });
     expect(over.status).toBe(409);
-    expect(over.body.error).toMatch(/exceeds the refundable 75000/);
+    expect(over.body.error).toMatch(/exceeds the refundable ₹750.00/);
     expect((await refund("NC-1002", { amount_minor: 75000 })).status).toBe(201);
     expect((await refund("NC-1002")).body.error).toBe("nothing left to refund");
   });
@@ -291,7 +291,7 @@ describe("GET /api/orders/[id]", () => {
 
   it("a network failure on the lookup does mark Shipping down", async () => {
     server.use(http.get(`${BASE}/shipping/shipments/:id`, () => HttpResponse.error()));
-    expect((await detail("NC-1004")).body.shippingError).toMatch(/^Shipping lookup failed: network error/);
+    expect((await detail("NC-1004")).body.shippingError).toMatch(/^Shipping lookup failed: Shipping API is unreachable/);
     expect(await shippingHealth()).toMatchObject({ status: "down" });
   });
 

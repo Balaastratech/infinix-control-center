@@ -3,6 +3,7 @@
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { getDb } from "@/server/db";
 import { approvals, operations, orders, payments, refunds } from "@/server/db/schema";
+import { formatMoney } from "@/lib/format";
 import { audit, type Actor } from "./audit";
 
 // A request in one of these states still reserves its amount. `submitted` = Payment API call in flight, not yet in
@@ -49,7 +50,7 @@ export function refundRefusal(orderId: string, amountMinor: number | undefined):
   if (refundableMinor <= 0) return "nothing left to refund";
   if (amountMinor === undefined) return null;
   if (!Number.isInteger(amountMinor) || amountMinor <= 0) return "amount must be a whole number of paise above 0";
-  if (amountMinor > refundableMinor) return `amount ${amountMinor} exceeds the refundable ${refundableMinor}`;
+  if (amountMinor > refundableMinor) return `Amount ${formatMoney(amountMinor)} exceeds the refundable ${formatMoney(refundableMinor)}`;
   return null;
 }
 
@@ -96,29 +97,35 @@ export function requestRefund(orderId: string, amountMinor: number | undefined, 
 
 // "Request full refunds": one pending approval per owed order (cancelled + captured + nothing refunded).
 // Orders that already have an open request are skipped.
-export function requestBulkRefunds(actor: Actor): { created: number; skipped: number; orderIds: string[] } {
-  const db = getDb();
-  const owed = db
-    .select({ id: orders.id })
+// Cancelled orders with a captured payment and money still owed: captured minus succeeded refunds.
+// amountMinor = what is still owed. pendingApproval = a request is already open for it.
+export function owedRefundOrders(): { orderId: string; amountMinor: number; pendingApproval: boolean }[] {
+  const succeeded = sql<number>`(SELECT coalesce(sum(r.amount_minor), 0) FROM ${refunds} r WHERE r.order_id = ${orders.id} AND r.status = 'succeeded')`;
+  return getDb()
+    .select({
+      orderId: orders.id,
+      amountMinor: sql<number>`${payments.amountMinor} - ${succeeded}`,
+      pendingApproval: sql<number>`EXISTS (SELECT 1 FROM ${operations} o WHERE o.order_id = ${orders.id} AND o.type = 'refund'
+        AND o.status IN (${sql.join(RESERVING_STATUSES.map((s) => sql`${s}`), sql`, `)}))`,
+    })
     .from(orders)
     .innerJoin(payments, eq(payments.orderId, orders.id))
-    .where(
-      and(
-        eq(orders.status, "cancelled"),
-        eq(payments.status, "captured"),
-        sql`NOT EXISTS (SELECT 1 FROM refunds r WHERE r.order_id = ${orders.id} AND r.status <> 'failed')`,
-      ),
-    )
+    .where(and(eq(orders.status, "cancelled"), eq(payments.status, "captured"), sql`${payments.amountMinor} - ${succeeded} > 0`))
     .orderBy(orders.id)
-    .all();
+    .all()
+    .map((r) => ({ ...r, pendingApproval: Boolean(r.pendingApproval) }));
+}
+
+export function requestBulkRefunds(actor: Actor): { created: number; skipped: number; orderIds: string[] } {
+  const owed = owedRefundOrders();
   let skipped = 0;
   const created: string[] = [];
-  for (const { id } of owed) {
+  for (const { orderId: id, amountMinor: owedMinor } of owed) {
     if (refundPosition(id).reservedMinor > 0) {
       skipped++;
       continue;
     }
-    const r = requestRefund(id, undefined, actor);
+    const r = requestRefund(id, owedMinor, actor); // the remaining amount, not the original capture
     if (r.ok) created.push(id);
     else skipped++;
   }

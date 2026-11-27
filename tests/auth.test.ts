@@ -104,8 +104,16 @@ describe("login / logout", () => {
   });
 
   it("logout expires the cookie", async () => {
-    const res = await logout();
+    const res = await logout(req("/api/auth/logout", { method: "POST" }));
     expect(res.headers.get("set-cookie")).toMatch(/^nova_session=; .*Max-Age=0/);
+  });
+
+  it("a successful login and a logout are audited with who and role", async () => {
+    const lastAudit = (action: string) => db.select().from(auditLog).where(eq(auditLog.action, action)).all().at(-1);
+    const cookie = await loginAs("operator@nova.test");
+    expect(lastAudit("auth.login")).toMatchObject({ actorLabel: "operator@nova.test", role: "operator", outcome: "ok" });
+    await logout(req("/api/auth/logout", { method: "POST", cookie }));
+    expect(lastAudit("auth.logout")).toMatchObject({ actorLabel: "operator@nova.test", role: "operator", outcome: "ok" });
   });
 
   it("the session cookie is not Secure outside production", async () => {
