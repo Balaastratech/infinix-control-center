@@ -46,7 +46,7 @@
   - the shipment is shipped, delayed or delivered (the mock refuses these too).
 - **Refund:**
   - Needs a captured payment AND an order that is cancelled or delivered.
-  - The amount must be 0 < amount ≤ captured minus already refunded.
+  - The amount must be 0 < amount ≤ captured minus non-failed refunds minus amounts in pending/approved requests.
   - Every refund needs Manager approval before the Payment API is called. That includes refunds started by a workflow.
 - **Final state comes only from the API's answer.** A refund is a success only when the reply body says `status: succeeded`, not just because the HTTP code is 201.
 
