@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { formatIst } from "@/lib/format";
 import type { EventRow } from "@/server/services/dashboard";
 import type { ServiceStatus } from "@/server/services/health";
+import { Alert, Badge, Card, Empty, SkeletonCard, TableWrap } from "../ui";
 
 interface SyncRun {
   id: number;
@@ -22,6 +23,8 @@ interface Data {
   eventTypes: string[];
   eventStatuses: string[];
 }
+
+const SERVICE_NAMES: Record<string, string> = { commerce: "Commerce API", payments: "Payment API", shipping: "Shipping API" };
 
 // "{"orders":60,"payments":60}" -> "orders 60, payments 60"
 const formatCounts = (json: string | null) => {
@@ -60,42 +63,33 @@ export function IntegrationsView() {
 
   const set = (field: "status" | "type", value: string) => setFilters((f) => ({ ...f, [field]: value }));
 
+  if (error && !data) return <Alert tone="bad">Could not load integration data: {error}</Alert>;
+  if (!data) return <SkeletonCard rows={5} />;
+
   return (
     <>
-      {error && <p className="error">Could not load integration data: {error}</p>}
-      {loading && <p>Loading…</p>}
+      {error && <Alert tone="bad">Could not refresh: {error}</Alert>}
+      <Card title="Services">
+        <div className="health">
+          {data.health.map((h) => (
+            <div key={h.service} className={`service${h.status === "down" ? " down" : ""}`}>
+              <span className="service-name">
+                {SERVICE_NAMES[h.service] ?? h.service} <Badge status={h.status} />
+              </span>
+              <span className="small muted">Last sync {formatIst(h.lastSyncAt)}</span>
+              <span className="small muted">Last OK {formatIst(h.lastOkAt)}</span>
+              {h.lastError && <span className="small error">{h.lastError}</span>}
+            </div>
+          ))}
+        </div>
+      </Card>
 
-      {data && (
-        <>
-          <h2>Services</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Service</th>
-                <th>Status</th>
-                <th>Last sync</th>
-                <th>Last OK</th>
-                <th>Error</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.health.map((h) => (
-                <tr key={h.service}>
-                  <td>{h.service}</td>
-                  <td className={h.status === "down" ? "error" : undefined}>{h.status}</td>
-                  <td>{formatIst(h.lastSyncAt)}</td>
-                  <td>{formatIst(h.lastOkAt)}</td>
-                  <td>{h.lastError ?? "-"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <h2>Sync runs (last {data.syncRuns.length})</h2>
-          {data.syncRuns.length === 0 ? (
-            <p>No sync has run yet. Use Sync now on the dashboard.</p>
-          ) : (
-            <table>
+      <Card title="Sync runs" count={data.syncRuns.length} flush>
+        {data.syncRuns.length === 0 ? (
+          <Empty>No sync has run yet. Use Sync now on the dashboard.</Empty>
+        ) : (
+          <TableWrap>
+            <table className="compact">
               <thead>
                 <tr>
                   <th>Started</th>
@@ -109,40 +103,50 @@ export function IntegrationsView() {
               <tbody>
                 {data.syncRuns.map((r) => (
                   <tr key={r.id}>
-                    <td>{formatIst(r.startedAt)}</td>
-                    <td>{formatIst(r.finishedAt)}</td>
-                    <td>{r.service}</td>
-                    <td className={r.status === "failed" ? "error" : undefined}>{r.status}</td>
+                    <td className="nowrap">{formatIst(r.startedAt)}</td>
+                    <td className="nowrap">{formatIst(r.finishedAt)}</td>
+                    <td>{SERVICE_NAMES[r.service] ?? r.service}</td>
+                    <td>
+                      <Badge status={r.status} />
+                    </td>
                     <td>
                       <small>{formatCounts(r.counts)}</small>
                     </td>
-                    <td>{r.error ?? "-"}</td>
+                    <td className={r.error ? "error" : "muted"}>{r.error ?? "-"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          )}
+          </TableWrap>
+        )}
+      </Card>
 
-          <h2>Webhook events</h2>
-          <p>
-            <select value={filters.status} onChange={(e) => set("status", e.target.value)}>
-              <option value="">status: any</option>
-              {data.eventStatuses.map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>{" "}
-            <select value={filters.type} onChange={(e) => set("type", e.target.value)}>
-              <option value="">type: any</option>
-              {data.eventTypes.map((t) => (
-                <option key={t}>{t}</option>
-              ))}
-            </select>{" "}
-            <small>Rejected = wrong or missing X-Webhook-Secret (not stored as an event). Duplicates are not stored.</small>
-          </p>
-          {data.events.length === 0 ? (
-            <p>No webhook events match.</p>
-          ) : (
-            <table>
+      <section className="card">
+        <div className="card-head">
+          <h2>
+            Webhook events <span className="count">{data.events.length}</span>
+          </h2>
+          <span className="muted small">Rejected = wrong or missing X-Webhook-Secret (audited, not stored). Duplicates are not stored.</span>
+        </div>
+        <div className="toolbar">
+          <select aria-label="Event status" value={filters.status} onChange={(e) => set("status", e.target.value)}>
+            <option value="">status: any</option>
+            {data.eventStatuses.map((s) => (
+              <option key={s}>{s}</option>
+            ))}
+          </select>
+          <select aria-label="Event type" value={filters.type} onChange={(e) => set("type", e.target.value)}>
+            <option value="">type: any</option>
+            {data.eventTypes.map((t) => (
+              <option key={t}>{t}</option>
+            ))}
+          </select>
+        </div>
+        {data.events.length === 0 ? (
+          <Empty>No webhook events match.</Empty>
+        ) : (
+          <TableWrap>
+            <table className="compact" style={{ opacity: loading ? 0.6 : 1 }}>
               <thead>
                 <tr>
                   <th>Received</th>
@@ -157,22 +161,24 @@ export function IntegrationsView() {
               <tbody>
                 {data.events.map((e) => (
                   <tr key={e.id}>
-                    <td>{formatIst(e.receivedAt)}</td>
-                    <td>{e.status === "rejected" ? "-" : e.id}</td>
-                    <td>{e.type}</td>
+                    <td className="nowrap">{formatIst(e.receivedAt)}</td>
+                    <td className="mono">{e.status === "rejected" ? "-" : e.id}</td>
+                    <td className="mono">{e.type}</td>
                     <td>{e.orderId ? <Link href={`/orders/${e.orderId}`}>{e.orderId}</Link> : "-"}</td>
-                    <td>{formatIst(e.occurredAt)}</td>
-                    <td className={e.status === "rejected" || e.status === "stale" ? "error" : undefined}>{e.status}</td>
+                    <td className="nowrap">{formatIst(e.occurredAt)}</td>
                     <td>
+                      <Badge status={e.status} />
+                    </td>
+                    <td style={{ maxWidth: 320, overflowWrap: "anywhere" }}>
                       <small>{e.note ?? "-"}</small>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          )}
-        </>
-      )}
+          </TableWrap>
+        )}
+      </section>
     </>
   );
 }

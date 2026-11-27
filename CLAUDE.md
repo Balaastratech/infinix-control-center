@@ -59,7 +59,7 @@ Money is integer paise everywhere (₹5,000 = 500000). Never use floats for mone
 - One slice at a time from PLAN.md. Don't start the next slice until I say so.
 - Routes are thin (zod parse → requireRole → service → JSON). All rules live in src/server/services.
 - Every rule has a test, including at least one failure case. Run `npm test` before saying "done".
-- Plain UI: tables, forms, status badges, loading/empty/error states. No styling work.
+- Clean, consistent UI built on the tokens in src/app/globals.css; no UI library. Tables, forms, status badges, loading/empty/error states.
   Show money as ₹ with 2 decimals (store paise) and times in IST (store UTC).
 - Must run on a fresh clone with no accounts: setup creates .env.local (random SESSION_SECRET) if missing.
 - Ask me before adding a dependency. Don't change a test to make it pass without telling me why.

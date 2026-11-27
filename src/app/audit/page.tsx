@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { AppHeader } from "../app-header";
+import { AppShell } from "../app-header";
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/server/auth/require-role";
 import { SESSION_COOKIE } from "@/server/auth/session";
@@ -9,10 +9,8 @@ export default async function AuditPage() {
   const user = await getSessionUser((await cookies()).get(SESSION_COOKIE)?.value);
   if (!user) redirect("/login");
   return (
-    <main>
-      <AppHeader user={user} />
-      <h1>Audit log</h1>
+    <AppShell user={user} title="Audit log" subtitle="Who did what, with which role, and the outcome.">
       <AuditLog />
-    </main>
+    </AppShell>
   );
 }

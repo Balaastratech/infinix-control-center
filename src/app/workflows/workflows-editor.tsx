@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { formatIst, formatMoney, parseRupees } from "@/lib/format";
+import { Alert, Badge, Card, Empty, Skeleton, SkeletonCard, TableWrap } from "../ui";
 
 // Option lists for the form only; the server validates every value again (services/workflows.ts).
 const TRIGGERS = ["payment.failed", "shipment.updated", "order.cancelled"];
@@ -190,174 +192,248 @@ export function WorkflowsEditor({ isManager }: { isManager: boolean }) {
 
   const runs = loadedRuns && runsFor && loadedRuns.workflowId === runsFor.id ? loadedRuns.items : null;
 
-  if (loadError) return <p className="error">Could not load workflows: {loadError}</p>;
-  if (!items) return <p>Loading…</p>;
+  if (loadError && !items) return <Alert tone="bad">Could not load workflows: {loadError}</Alert>;
+  if (!items) return <SkeletonCard rows={3} />;
 
   return (
     <>
-      {message && <p className={message.ok ? undefined : "error"}>{message.text}</p>}
-      {items.length === 0 ? (
-        <p>No workflows yet.</p>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>When</th>
-              <th>If all of</th>
-              <th>Then</th>
-              <th>Enabled</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((w) => (
-              <tr key={w.id}>
-                <td>{w.name}</td>
-                <td>{w.trigger}</td>
-                <td>{w.conditions.map(describeCondition).join(" AND ")}</td>
-                <td>{describeAction(w.action)}</td>
-                <td>{w.enabled ? "yes" : "no"}</td>
-                <td>
-                  <button onClick={() => setRunsFor(w)}>Executions</button>
-                  {isManager && (
-                    <>
-                      {" "}
-                      <button
-                        disabled={busy}
-                        onClick={() => run(() => send(`/api/workflows/${w.id}`, "PATCH", { enabled: !w.enabled }), `${w.name} ${w.enabled ? "disabled" : "enabled"}.`)}
-                      >
-                        {w.enabled ? "Disable" : "Enable"}
-                      </button>{" "}
-                      <button disabled={busy} onClick={() => setForm(toForm(w))}>
-                        Edit
-                      </button>
-                    </>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {isManager && !form && <p><button onClick={() => setForm(EMPTY)}>New workflow</button></p>}
+      {message && <Alert tone={message.ok ? "ok" : "bad"}>{message.text}</Alert>}
+      <Card
+        title="Rules"
+        count={items.length}
+        actions={
+          isManager && !form ? (
+            <button className="primary sm" onClick={() => setForm(EMPTY)}>
+              New workflow
+            </button>
+          ) : (
+            !isManager && <span className="muted small">Only Managers can create or edit workflows.</span>
+          )
+        }
+        flush
+      >
+        {items.length === 0 ? (
+          <Empty>No workflows yet.</Empty>
+        ) : (
+          <TableWrap>
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>When</th>
+                  <th>If all of</th>
+                  <th>Then</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((w) => (
+                  <tr key={w.id}>
+                    <td>
+                      <b>{w.name}</b>
+                    </td>
+                    <td className="mono">{w.trigger}</td>
+                    <td>
+                      {w.conditions.map((c, i) => (
+                        <div key={i} className="small">
+                          {i > 0 && <span className="muted">and </span>}
+                          {describeCondition(c)}
+                        </div>
+                      ))}
+                    </td>
+                    <td className="small">{describeAction(w.action)}</td>
+                    <td>
+                      <Badge status={w.enabled ? "enabled" : "disabled"} />
+                    </td>
+                    <td>
+                      <span className="row">
+                        <button className="sm" onClick={() => setRunsFor(w)} aria-pressed={runsFor?.id === w.id}>
+                          Executions
+                        </button>
+                        {isManager && (
+                          <>
+                            <button
+                              className="sm"
+                              disabled={busy}
+                              onClick={() => run(() => send(`/api/workflows/${w.id}`, "PATCH", { enabled: !w.enabled }), `${w.name} ${w.enabled ? "disabled" : "enabled"}.`)}
+                            >
+                              {w.enabled ? "Disable" : "Enable"}
+                            </button>
+                            <button className="sm" disabled={busy} onClick={() => setForm(toForm(w))}>
+                              Edit
+                            </button>
+                          </>
+                        )}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableWrap>
+        )}
+      </Card>
 
       {form && (
-        <form onSubmit={save}>
-          <h2>{form.id ? `Edit workflow #${form.id}` : "New workflow"}</h2>
-          <p>
-            <label>
-              Name <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required maxLength={100} />
-            </label>{" "}
-            <label>
-              When{" "}
-              <select value={form.trigger} onChange={(e) => setForm({ ...form, trigger: e.target.value })}>
-                {TRIGGERS.map((t) => <option key={t}>{t}</option>)}
-              </select>
-            </label>
-          </p>
-          <fieldset>
-            <legend>If all of (checked against stored order, payment and shipment data)</legend>
-            {form.conditions.map((c, i) => {
-              const isAmount = c.field === "amount_minor";
-              return (
-                <p key={i}>
-                  <select
-                    value={c.field}
-                    onChange={(e) => {
-                      const field = e.target.value;
-                      setCondition(i, { field, op: "eq", value: field === "amount_minor" ? "" : STATUS_OPTIONS[field][0] });
-                    }}
-                  >
-                    {FIELDS.map((f) => <option key={f}>{f}</option>)}
-                  </select>{" "}
-                  <select value={c.op} onChange={(e) => setCondition(i, { op: e.target.value })}>
-                    {(isAmount ? AMOUNT_OPS : ["eq", "neq"]).map((o) => <option key={o}>{o}</option>)}
-                  </select>{" "}
-                  {isAmount ? (
-                    <>₹ <input value={c.value} onChange={(e) => setCondition(i, { value: e.target.value })} inputMode="decimal" size={12} required /></>
-                  ) : (
-                    <select value={c.value} onChange={(e) => setCondition(i, { value: e.target.value })}>
-                      {STATUS_OPTIONS[c.field].map((s) => <option key={s}>{s}</option>)}
+        <Card title={form.id ? `Edit workflow #${form.id}` : "New workflow"}>
+          <form className="stack" onSubmit={save}>
+            <div className="row" style={{ alignItems: "flex-end" }}>
+              <label className="field" style={{ flex: "1 1 260px" }}>
+                <span>Name</span>
+                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required maxLength={100} />
+              </label>
+              <label className="field">
+                <span>When</span>
+                <select value={form.trigger} onChange={(e) => setForm({ ...form, trigger: e.target.value })}>
+                  {TRIGGERS.map((t) => (
+                    <option key={t}>{t}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <fieldset className="stack">
+              <legend>If all of (checked against stored order, payment and shipment data)</legend>
+              {form.conditions.map((c, i) => {
+                const isAmount = c.field === "amount_minor";
+                return (
+                  <div key={i} className="row">
+                    <select
+                      aria-label="Field"
+                      value={c.field}
+                      onChange={(e) => {
+                        const field = e.target.value;
+                        setCondition(i, { field, op: "eq", value: field === "amount_minor" ? "" : STATUS_OPTIONS[field][0] });
+                      }}
+                    >
+                      {FIELDS.map((f) => (
+                        <option key={f}>{f}</option>
+                      ))}
                     </select>
-                  )}{" "}
-                  <button type="button" disabled={form.conditions.length === 1} onClick={() => setForm({ ...form, conditions: form.conditions.filter((_, j) => j !== i) })}>
-                    Remove
-                  </button>
-                </p>
-              );
-            })}
-            <button type="button" disabled={form.conditions.length >= 10} onClick={() => setForm({ ...form, conditions: [...form.conditions, { field: "amount_minor", op: "gt", value: "" }] })}>
-              Add condition
-            </button>
-          </fieldset>
-          <p>
-            <label>
-              Then{" "}
+                    <select aria-label="Operator" value={c.op} onChange={(e) => setCondition(i, { op: e.target.value })}>
+                      {(isAmount ? AMOUNT_OPS : ["eq", "neq"]).map((o) => (
+                        <option key={o}>{o}</option>
+                      ))}
+                    </select>
+                    {isAmount ? (
+                      <label className="money-input" aria-label="Amount in rupees">
+                        <span>₹</span>
+                        <input value={c.value} onChange={(e) => setCondition(i, { value: e.target.value })} inputMode="decimal" required />
+                      </label>
+                    ) : (
+                      <select aria-label="Value" value={c.value} onChange={(e) => setCondition(i, { value: e.target.value })}>
+                        {STATUS_OPTIONS[c.field].map((s) => (
+                          <option key={s}>{s}</option>
+                        ))}
+                      </select>
+                    )}
+                    <button
+                      type="button"
+                      className="ghost sm"
+                      disabled={form.conditions.length === 1}
+                      onClick={() => setForm({ ...form, conditions: form.conditions.filter((_, j) => j !== i) })}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                );
+              })}
+              <div>
+                <button
+                  type="button"
+                  className="sm"
+                  disabled={form.conditions.length >= 10}
+                  onClick={() => setForm({ ...form, conditions: [...form.conditions, { field: "amount_minor", op: "gt", value: "" }] })}
+                >
+                  + Add condition
+                </button>
+              </div>
+            </fieldset>
+            <label className="field">
+              <span>Then</span>
               <select value={form.actionType} onChange={(e) => setForm({ ...form, actionType: e.target.value as Action["type"] })}>
                 <option value="create_ticket">create support ticket</option>
                 <option value="request_refund">request refund (needs Manager approval)</option>
               </select>
             </label>
-          </p>
-          {form.actionType === "create_ticket" ? (
-            <p>
-              <label>
-                Ticket reason <input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} required maxLength={500} size={60} />
+            {form.actionType === "create_ticket" ? (
+              <label className="field">
+                <span>Ticket reason</span>
+                <input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} required maxLength={500} />
+                <span className="hint">Placeholders: {PLACEHOLDER_HINT}</span>
               </label>
-              <br />
-              <small>Placeholders: {PLACEHOLDER_HINT}</small>
-            </p>
-          ) : (
-            <p>
-              <label>
-                Refund amount ₹ <input value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} inputMode="decimal" size={12} placeholder="full" />
-              </label>{" "}
-              <small>Blank = the full refundable amount. Over the limit, the run fails with the reason.</small>
-            </p>
-          )}
-          <p>
-            <button type="submit" disabled={busy}>Save</button>{" "}
-            <button type="button" onClick={() => setForm(null)}>Cancel</button>
-          </p>
-        </form>
+            ) : (
+              <label className="field">
+                <span>Refund amount</span>
+                <span className="money-input" style={{ alignSelf: "flex-start" }}>
+                  <span>₹</span>
+                  <input value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} inputMode="decimal" placeholder="full" />
+                </span>
+                <span className="hint">Blank = the full refundable amount. Over the limit, the run fails with the reason.</span>
+              </label>
+            )}
+            <div className="row">
+              <button type="submit" className="primary" disabled={busy} aria-busy={busy}>
+                {busy ? "Saving…" : "Save"}
+              </button>
+              <button type="button" className="ghost" onClick={() => setForm(null)}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        </Card>
       )}
 
       {runsFor && (
-        <section>
-          <h2>Executions: {runsFor.name}</h2>
+        <Card
+          title={`Executions: ${runsFor.name}`}
+          count={runs?.length}
+          actions={
+            <button className="ghost sm" onClick={() => setRunsFor(null)}>
+              Close
+            </button>
+          }
+          flush
+        >
           {!runs ? (
-            <p>Loading…</p>
+            <div className="card-body">
+              <Skeleton h={16} />
+            </div>
           ) : runs.length === 0 ? (
-            <p>No executions yet.</p>
+            <Empty>No executions yet.</Empty>
           ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>When</th>
-                  <th>Event</th>
-                  <th>Order</th>
-                  <th>Matched</th>
-                  <th>Outcome</th>
-                  <th>Result / error</th>
-                </tr>
-              </thead>
-              <tbody>
-                {runs.map((r) => (
-                  <tr key={r.id}>
-                    <td>{formatIst(r.ranAt)}</td>
-                    <td>{r.eventId}</td>
-                    <td>{r.orderId ? <a href={`/orders/${r.orderId}`}>{r.orderId}</a> : "-"}</td>
-                    <td>{r.matched ? "yes" : "no"}</td>
-                    <td>{r.outcome}</td>
-                    <td className={r.outcome === "failed" ? "error" : undefined}>{r.error ?? r.result ?? "-"}</td>
+            <TableWrap>
+              <table className="compact">
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>Event</th>
+                    <th>Order</th>
+                    <th>Matched</th>
+                    <th>Outcome</th>
+                    <th>Result / error</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {runs.map((r) => (
+                    <tr key={r.id}>
+                      <td className="nowrap">{formatIst(r.ranAt)}</td>
+                      <td className="mono">{r.eventId}</td>
+                      <td>{r.orderId ? <Link href={`/orders/${r.orderId}`}>{r.orderId}</Link> : "-"}</td>
+                      <td>{r.matched ? "yes" : "no"}</td>
+                      <td>
+                        <Badge status={r.outcome} />
+                      </td>
+                      <td className={r.outcome === "failed" ? "error" : undefined}>
+                        <small>{r.error ?? r.result ?? "-"}</small>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </TableWrap>
           )}
-        </section>
+        </Card>
       )}
     </>
   );

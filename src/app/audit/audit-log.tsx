@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { formatIst } from "@/lib/format";
+import { Alert, Badge, Empty, Skeleton, TableWrap } from "../ui";
 
 interface Entry {
   id: number;
@@ -53,68 +54,87 @@ export function AuditLog() {
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
 
   return (
-    <>
-      <p>
-        <select value={filters.action} onChange={(e) => set("action", e.target.value)}>
+    <section className="card">
+      <div className="toolbar">
+        <select aria-label="Action" value={filters.action} onChange={(e) => set("action", e.target.value)}>
           <option value="">action: any</option>
           {data?.actions.map((a) => (
             <option key={a}>{a}</option>
           ))}
-        </select>{" "}
-        <select value={filters.user} onChange={(e) => set("user", e.target.value)}>
+        </select>
+        <select aria-label="User" value={filters.user} onChange={(e) => set("user", e.target.value)}>
           <option value="">user: any</option>
           {data?.users.map((u) => (
             <option key={u}>{u}</option>
           ))}
         </select>
-      </p>
+      </div>
 
-      {error && <p className="error">Could not load the audit log: {error}</p>}
-      {loading && <p>Loading…</p>}
-      {!loading && !error && data?.items.length === 0 && <p>No audit entries match.</p>}
+      {error && (
+        <div className="card-body">
+          <Alert tone="bad">Could not load the audit log: {error}</Alert>
+        </div>
+      )}
+      {!data && loading && (
+        <div className="card-body stack" aria-busy="true" aria-label="Loading">
+          {Array.from({ length: 8 }, (_, i) => (
+            <Skeleton key={i} h={18} />
+          ))}
+        </div>
+      )}
+      {!loading && !error && data?.items.length === 0 && <Empty>No audit entries match.</Empty>}
 
       {data && data.items.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>When</th>
-              <th>Who</th>
-              <th>Role</th>
-              <th>Action</th>
-              <th>Target</th>
-              <th>Outcome</th>
-              <th>Detail</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.items.map((e) => (
-              <tr key={e.id}>
-                <td>{formatIst(e.at)}</td>
-                <td>{e.actorLabel}</td>
-                <td>{e.role ?? "-"}</td>
-                <td>{e.action}</td>
-                <td>{e.target ?? "-"}</td>
-                <td>{e.outcome}</td>
-                <td>
-                  <small>{e.detail ?? "-"}</small>
-                </td>
+        <TableWrap>
+          <table className="compact" style={{ opacity: loading ? 0.6 : 1 }}>
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Who</th>
+                <th>Action</th>
+                <th>Target</th>
+                <th>Outcome</th>
+                <th>Detail</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.items.map((e) => (
+                <tr key={e.id}>
+                  <td className="nowrap">{formatIst(e.at)}</td>
+                  <td>
+                    {e.actorLabel}
+                    <small>{e.role ?? "no role"}</small>
+                  </td>
+                  <td className="mono">{e.action}</td>
+                  <td>{e.target ?? "-"}</td>
+                  <td>
+                    <Badge status={e.outcome} />
+                  </td>
+                  <td style={{ maxWidth: 360, overflowWrap: "anywhere" }}>
+                    <small className="mono">{e.detail ?? "-"}</small>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableWrap>
       )}
 
       {data && (
-        <p>
-          Page {data.page} of {pages} ({data.total} entries){" "}
-          <button disabled={page <= 1} onClick={() => setPage(page - 1)}>
-            Previous
-          </button>{" "}
-          <button disabled={page >= pages} onClick={() => setPage(page + 1)}>
-            Next
-          </button>
-        </p>
+        <div className="card-foot">
+          <span className="tabular">
+            Page {data.page} of {pages} · {data.total} entries
+          </span>
+          <span className="row">
+            <button className="sm" disabled={page <= 1 || loading} onClick={() => setPage(page - 1)}>
+              ← Previous
+            </button>
+            <button className="sm" disabled={page >= pages || loading} onClick={() => setPage(page + 1)}>
+              Next →
+            </button>
+          </span>
+        </div>
       )}
-    </>
+    </section>
   );
 }

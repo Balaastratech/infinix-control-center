@@ -1,9 +1,9 @@
 import { cookies } from "next/headers";
 import Link from "next/link";
-import { AppHeader } from "../../app-header";
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/server/auth/require-role";
 import { SESSION_COOKIE } from "@/server/auth/session";
+import { AppShell } from "../../app-header";
 import { OrderDetail } from "./order-detail";
 
 export default async function OrderPage({ params }: PageProps<"/orders/[id]">) {
@@ -11,14 +11,17 @@ export default async function OrderPage({ params }: PageProps<"/orders/[id]">) {
   if (!user) redirect("/login");
   const { id } = await params;
   return (
-    <main>
-      <AppHeader user={user} />
-      <p>
-        <Link href="/orders">All orders</Link>
-      </p>
-      <h1>Order {id}</h1>
-      {/* The buttons only mirror the role; every route checks it again. */}
+    <AppShell
+      user={user}
+      title={`Order ${id}`}
+      crumb={
+        <Link className="crumb" href="/orders">
+          ← All orders
+        </Link>
+      }
+    >
+      {/* The actions only mirror the role and the rules; every route checks them again. */}
       <OrderDetail id={id} canOperate={user.role !== "viewer"} />
-    </main>
+    </AppShell>
   );
 }

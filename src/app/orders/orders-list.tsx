@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { formatIst, formatMoney } from "@/lib/format";
+import { Alert, Badge, Empty, Skeleton, TableWrap } from "../ui";
 
 interface OrderRow {
   id: string;
@@ -78,11 +79,18 @@ export function OrdersList() {
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
 
   return (
-    <>
-      <p>
-        <input placeholder="Order id, customer name or email" value={filters.q} onChange={(e) => set("q", e.target.value)} size={32} />{" "}
+    <section className="card">
+      <div className="toolbar">
+        <input
+          className="grow"
+          type="search"
+          placeholder="Order id, customer name or email"
+          aria-label="Search orders"
+          value={filters.q}
+          onChange={(e) => set("q", e.target.value)}
+        />
         {(Object.keys(FILTERS) as (keyof typeof FILTERS)[]).map((key) => (
-          <select key={key} value={filters[key]} onChange={(e) => set(key, e.target.value)}>
+          <select key={key} aria-label={`${key.replace("Status", "")} status`} value={filters[key]} onChange={(e) => set(key, e.target.value)}>
             <option value="">{key.replace("Status", "")}: any</option>
             {FILTERS[key].map((s) => (
               <option key={s} value={s}>
@@ -90,69 +98,93 @@ export function OrdersList() {
               </option>
             ))}
           </select>
-        ))}{" "}
-        <label>
-          <input type="checkbox" checked={filters.localAhead === "true"} onChange={(e) => set("localAhead", e.target.checked ? "true" : "")} /> local
-          ahead only
+        ))}
+        <label className="check">
+          <input type="checkbox" checked={filters.localAhead === "true"} onChange={(e) => set("localAhead", e.target.checked ? "true" : "")} /> Local ahead only
         </label>
-      </p>
+      </div>
 
-      {error && <p className="error">Could not load orders: {error}</p>}
-      {loading && <p>Loading…</p>}
-      {!loading && !error && data?.items.length === 0 && <p>No orders match.</p>}
+      {error && (
+        <div className="card-body">
+          <Alert tone="bad">Could not load orders: {error}</Alert>
+        </div>
+      )}
+      {!data && loading && <SkeletonRows />}
+      {!loading && !error && data?.items.length === 0 && <Empty>No orders match these filters.</Empty>}
 
       {data && data.items.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>Order</th>
-              <th>Customer</th>
-              <th>Amount</th>
-              <th>Order</th>
-              <th>Payment</th>
-              <th>Shipment</th>
-              <th>Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.items.map((o) => (
-              <tr key={o.id}>
-                <td>
-                  <Link href={`/orders/${o.id}`}>{o.id}</Link>
-                </td>
-                <td>
-                  {o.customerName}
-                  <br />
-                  <small>{o.customerEmail}</small>
-                </td>
-                <td>{formatMoney(o.amountMinor)}</td>
-                <td>
-                  {o.status}
-                  {o.status !== o.upstreamStatus && <small> (local ahead; upstream: {o.upstreamStatus})</small>}
-                </td>
-                <td>
-                  {o.paymentStatus ?? "-"}
-                  {o.paymentStatus !== o.paymentUpstreamStatus && <small> (local ahead; upstream: {o.paymentUpstreamStatus})</small>}
-                </td>
-                <td>{o.shipmentStatus ?? "-"}</td>
-                <td>{formatIst(o.createdAt)}</td>
+        <TableWrap>
+          <table style={{ opacity: loading ? 0.6 : 1 }}>
+            <thead>
+              <tr>
+                <th>Order</th>
+                <th>Customer</th>
+                <th className="num">Amount</th>
+                <th>Order</th>
+                <th>Payment</th>
+                <th>Shipment</th>
+                <th>Created</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.items.map((o) => (
+                <tr key={o.id}>
+                  <td>
+                    <Link href={`/orders/${o.id}`}>
+                      <b>{o.id}</b>
+                    </Link>
+                  </td>
+                  <td>
+                    {o.customerName}
+                    <small>{o.customerEmail}</small>
+                  </td>
+                  <td className="num">{formatMoney(o.amountMinor)}</td>
+                  <td>
+                    <Badge status={o.status} />
+                    {o.upstreamStatus && o.status !== o.upstreamStatus && <span className="badge-sub">local ahead · upstream {o.upstreamStatus}</span>}
+                  </td>
+                  <td>
+                    <Badge status={o.paymentStatus} />
+                    {o.paymentUpstreamStatus && o.paymentStatus !== o.paymentUpstreamStatus && (
+                      <span className="badge-sub">local ahead · upstream {o.paymentUpstreamStatus}</span>
+                    )}
+                  </td>
+                  <td>
+                    <Badge status={o.shipmentStatus} />
+                  </td>
+                  <td className="nowrap">{formatIst(o.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </TableWrap>
       )}
 
       {data && (
-        <p>
-          <button disabled={page <= 1 || loading} onClick={() => setPage((p) => p - 1)}>
-            Previous
-          </button>{" "}
-          Page {data.page} of {pages} ({data.total} orders){" "}
-          <button disabled={page >= pages || loading} onClick={() => setPage((p) => p + 1)}>
-            Next
-          </button>
-        </p>
+        <div className="card-foot">
+          <span className="tabular">
+            Page {data.page} of {pages} · {data.total} orders
+          </span>
+          <span className="row">
+            <button className="sm" disabled={page <= 1 || loading} onClick={() => setPage((p) => p - 1)}>
+              ← Previous
+            </button>
+            <button className="sm" disabled={page >= pages || loading} onClick={() => setPage((p) => p + 1)}>
+              Next →
+            </button>
+          </span>
+        </div>
       )}
-    </>
+    </section>
+  );
+}
+
+function SkeletonRows() {
+  return (
+    <div className="card-body stack" aria-busy="true" aria-label="Loading orders">
+      {Array.from({ length: 8 }, (_, i) => (
+        <Skeleton key={i} h={18} />
+      ))}
+    </div>
   );
 }
